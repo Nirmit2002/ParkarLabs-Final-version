@@ -1,0 +1,19 @@
+{
+  "name": "parkarlabs-db",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "migrate:up": "node-pg-migrate up --migrations-dir ./migrations",
+    "migrate:down": "node-pg-migrate down --migrations-dir ./migrations",
+    "migrate:reset": "node-pg-migrate reset --migrations-dir ./migrations",
+    "seed": "node ./seeds/run-seeds.js",
+    "seed:sessions": "node ./seeds/run-session-seed.js",
+    "seed:all": "node ./seeds/run-seeds-full.js"
+  },
+  "dependencies": {
+    "csv-parse": "^6.1.0",
+    "dotenv": "^17.2.2",
+    "node-pg-migrate": "^7.5.0",
+    "pg": "^8.11.0"
+  }
+}

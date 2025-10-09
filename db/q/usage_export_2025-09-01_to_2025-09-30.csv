@@ -1,0 +1,2 @@
+id,team_id,user_id,period_start,cores_used,memory_mb_used,storage_mb_used,concurrent_containers,updated_at
+1,,1,2025-09-23,1,1024,10240,0,2025-09-23 15:20:48.607221

@@ -1,0 +1,38 @@
+API ENDPOINTS DOCUMENTATION
+===========================
+
+Extracting all route definitions...
+
+backend/src/routes/user.js:router.use(requireAuth);
+backend/src/routes/user.js:router.get('/test', async (req, res) => {
+backend/src/routes/admin.js:router.use(requireManager);
+backend/src/routes/admin.js:router.get('/test', async (req, res) => {
+backend/src/routes/courses.js:router.get('/', requireAuth, coursesController.getCourses);
+backend/src/routes/courses.js:router.get('/:id', requireAuth, coursesController.getCourse);
+backend/src/routes/courses.js:router.post('/', requireManager, courseValidation, checkValidation, coursesController.createCourse);
+backend/src/routes/courses.js:router.put('/:id', requireManager, courseValidation, checkValidation, coursesController.updateCourse);
+backend/src/routes/courses.js:router.delete('/:id', requireManager, coursesController.deleteCourse);
+backend/src/routes/courses.js:router.post('/:id/modules', requireManager, moduleValidation, checkValidation, coursesController.addModule);
+backend/src/routes/courses.js:router.put('/:id/modules/:moduleId', requireManager, moduleValidation, checkValidation, coursesController.updateModule);
+backend/src/routes/courses.js:router.delete('/:id/modules/:moduleId', requireManager, coursesController.deleteModule);
+backend/src/routes/auth.js:router.post('/register', registerValidation, handleValidationErrors, authController.register);
+backend/src/routes/auth.js:router.post('/login', loginValidation, handleValidationErrors, authController.login);
+backend/src/routes/auth.js:router.get('/profile', requireAuth, authController.getProfile);
+backend/src/routes/auth.js:router.post('/logout', requireAuth, authController.logout);
+backend/src/routes/auth.js:router.get('/verify', requireAuth, authController.verifyToken);
+backend/src/routes/auth.js:router.get('/test', async (req, res) => {
+backend/src/routes/auth.js:router.get('/users', async (req, res) => {
+backend/src/routes/tasks.js:router.get('/', requireManager, getAllTasks);
+backend/src/routes/tasks.js:router.post('/', requireManager, taskValidation, checkValidation, createTask);
+backend/src/routes/tasks.js:router.delete('/:id', requireManager, deleteTask);
+backend/src/routes/tasks.js:router.post('/:id/assign', requireManager, assignTaskValidation, checkValidation, assignTask);
+backend/src/routes/tasks.js:router.get('/my-tasks', requireAuth, getMyTasks);
+backend/src/routes/tasks.js:router.patch('/:id/status', requireAuth, statusUpdateValidation, checkValidation, updateTaskStatus);
+backend/src/routes/users.js:router.get('/stats', requireManager, usersController.getUserStats);
+backend/src/routes/users.js:router.get('/roles', requireManager, usersController.getRoles);
+backend/src/routes/users.js:router.get('/', requireManager, getUsersQueryValidation, checkValidation, usersController.getAllUsers);
+backend/src/routes/users.js:router.get('/:id', requireManager, getUserValidation, checkValidation, usersController.getUserById);
+backend/src/routes/users.js:router.post('/', requireManager, createUserValidation, checkValidation, usersController.createUser);
+backend/src/routes/users.js:router.put('/:id', requireManager, updateUserValidation, checkValidation, usersController.updateUser);
+backend/src/routes/users.js:router.delete('/:id', requireManager, getUserValidation, checkValidation, usersController.deleteUser);
+backend/src/routes/containers.js:router.post('/launch', requireAuth, dependenciesValidation, containersController.launch);

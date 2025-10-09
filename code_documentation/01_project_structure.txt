@@ -1,0 +1,155 @@
+PARKARLABS PROJECT STRUCTURE
+============================
+Generated: $(date)
+
+Directory Tree:
+.
+├── backend
+│   ├── config
+│   │   ├── auth
+│   │   ├── database
+│   │   ├── database.js
+│   │   ├── lxc
+│   │   └── server
+│   ├── logs
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── scripts
+│   │   ├── backup
+│   │   ├── deploy
+│   │   └── maintenance
+│   └── src
+│       ├── controllers
+│       ├── middleware
+│       ├── models
+│       ├── routes
+│       ├── server.js
+│       ├── server.js.bak
+│       ├── server.jsnirmit
+│       ├── services
+│       └── utils
+├── code_documentation
+│   └── 01_project_structure.txt
+├── db
+│   ├── analysis_output
+│   │   ├── enums_types.md
+│   │   ├── functions_complete.md
+│   │   └── tables_complete.md
+│   ├── comprehensive_db_extractor.sh
+│   ├── database_analysis_complete.txt
+│   ├── init.sql
+│   ├── js_analysis.json
+│   ├── js_analyzer.js
+│   ├── migrate.config.js
+│   ├── migrations
+│   │   ├── 1695470000000_create_core_types_and_tables.js
+│   │   ├── 1695470100000_create_courses_modules.js
+│   │   ├── 1695470200000_create_tasks_assignments.js
+│   │   ├── 1695470300000_create_templates_and_dependencies.js
+│   │   ├── 1695470400000_create_containers_and_snapshots.js
+│   │   ├── 1695470500000_create_audit_import_and_metrics.js
+│   │   ├── 1695470600000_create_shared_tables_and_indexes.js
+│   │   ├── 1695470700000_create_audit_triggers.js
+│   │   ├── 1695470800000_add_constraints_and_checks.js
+│   │   ├── 1695470900000_adjust_fk_ondelete_behaviour.js
+│   │   ├── 1695471000000_enforce_assignment_status_fk_like.js
+│   │   ├── 1695471100000_sessions_sshkeys_usage_and_retention.js
+│   │   ├── 1695471200000_quota_functions.js
+│   │   ├── 1695471300000_snapshot_helpers.js
+│   │   ├── 1695471400000_dbroles_rls_and_triggers.js
+│   │   ├── 1695471500000_transactional_container_provisioning.js
+│   │   ├── 1695471600000_web_ssh_sessions.js
+│   │   ├── 1695471700000_container_lifecycle.js
+│   │   ├── 1695471800000_search_indexes.js
+│   │   ├── 1695471900000_monitoring_views.js
+│   │   ├── 1695472000000_import_job_improvements.js
+│   │   ├── 1695472100000_template_versioning.js
+│   │   ├── 1695472200000_lxc_operation_queue_and_audit.js
+│   │   ├── 1695472300000_billing_and_export.js
+│   │   └── 1695472400000_housekeeping_and_health.js
+│   ├── nano
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── psql
+│   ├── q
+│   │   ├── retention.log
+│   │   └── usage_export_2025-09-01_to_2025-09-30.csv
+│   ├── q.backup
+│   ├── schemas
+│   │   ├── ERD.md
+│   │   └── init.sql
+│   ├── scripts
+│   │   ├── backup_db.sh
+│   │   ├── connect.sh
+│   │   ├── generate_usage_export.sh
+│   │   ├── generate_usage_export_client.sh
+│   │   ├── refresh_monitoring_views.sh
+│   │   ├── restore_db.sh
+│   │   └── run_retention.sh
+│   ├── seeds
+│   │   ├── import_worker_example.js
+│   │   ├── run-seeds-full.js
+│   │   ├── run-seeds.js
+│   │   └── run-session-seed.js
+│   └── simple_db_extractor.sh
+├── extract_code.sh
+├── frontend
+│   ├── components
+│   │   ├── WebSSH.js
+│   │   ├── admin
+│   │   ├── auth
+│   │   ├── containers
+│   │   ├── courses
+│   │   ├── dashboard
+│   │   ├── layout
+│   │   ├── tasks
+│   │   ├── ui
+│   │   └── user
+│   ├── contexts
+│   │   ├── AuthContext
+│   │   └── ThemeContext
+│   ├── hooks
+│   │   ├── useAuth
+│   │   ├── useContainer
+│   │   └── useCourse
+│   ├── lib
+│   │   ├── api
+│   │   ├── auth
+│   │   └── utils
+│   ├── next.config.js
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── pages
+│   │   ├── _app.js
+│   │   ├── admin
+│   │   ├── api
+│   │   ├── auth
+│   │   ├── index.js
+│   │   └── user
+│   ├── pics
+│   │   ├── DSC_7009-min.jpg
+│   │   ├── DSC_7050-min.jpg
+│   │   ├── DSC_7104-min.jpg
+│   │   ├── DSC_7292-min.jpg
+│   │   ├── innovative-futuristic-classroom-students-min.jpg
+│   │   └── representation-user-experience-interface-design-min.jpg
+│   ├── postcss.config.js
+│   ├── public
+│   │   ├── assets
+│   │   ├── icons
+│   │   └── images
+│   ├── styles
+│   │   ├── components
+│   │   ├── globals
+│   │   └── globals.css
+│   ├── tailwind.config.js
+│   ├── types
+│   └── utils
+└── shared
+    ├── constants
+    ├── schemas
+    ├── types
+    ├── utils
+    └── validators
+
+70 directories, 78 files

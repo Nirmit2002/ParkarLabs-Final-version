@@ -1,0 +1,34 @@
+# Node modules
+node_modules/
+
+# Next.js / build outputs
+.next/
+dist/
+out/
+build/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Env files
+.env
+.env.*.local
+
+# DB dumps and postgres data
+*.dump
+*.sql
+postgres_data/
+db/backups/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# temp
+tmp/
+temp/
+*.swp

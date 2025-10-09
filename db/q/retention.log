@@ -1,0 +1,22 @@
+ move_old_audit_logs 
+---------------------
+ 
+(1 row)
+
+ purge_old_metrics 
+-------------------
+ 
+(1 row)
+
+DELETE 3
+ move_old_audit_logs 
+---------------------
+ 
+(1 row)
+
+ purge_old_metrics 
+-------------------
+ 
+(1 row)
+
+DELETE 0

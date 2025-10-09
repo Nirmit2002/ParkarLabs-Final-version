@@ -1,0 +1,34 @@
+FEATURE IMPLEMENTATION STATUS
+==============================
+
+Analyzing what's implemented vs what's missing...
+
+BACKEND FILES:
+
+Controllers:
+auth.js
+containers.js
+courses.js
+tasks.js
+users.js
+
+Routes:
+admin.js
+auth.js
+containers.js
+courses.js
+tasks.js
+user.js
+users.js
+
+FRONTEND PAGES:
+
+Admin Pages:
+courses.js
+dashboard.js
+tasks.js
+users.js
+
+User Pages:
+dashboard.js
+tasks.js

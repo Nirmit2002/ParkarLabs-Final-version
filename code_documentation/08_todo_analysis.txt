@@ -1,0 +1,12 @@
+TODO AND MISSING FEATURES
+=========================
+
+Searching for TODO comments and incomplete features...
+
+
+TODO comments in backend:
+backend/src/services/websocket.js:        // Optionally: check container ownership in DB here (left as TODO)
+
+
+TODO comments in frontend:
+None found

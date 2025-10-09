@@ -1,0 +1,47 @@
+{
+  "name": "parkarlabs-backend",
+  "version": "1.0.0",
+  "description": "ParkarLabs Backend API Server",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "jest",
+    "migrate:up": "cd ../db && npm run migrate:up",
+    "migrate:down": "cd ../db && npm run migrate:down",
+    "seed": "cd ../db && npm run seed:all"
+  },
+  "keywords": [
+    "lab",
+    "lxc",
+    "containers",
+    "education"
+  ],
+  "author": "ParkarLabs Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.0.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-session": "^1.17.3",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "passport": "^0.7.0",
+    "pg": "^8.11.3",
+    "ssh2": "^1.17.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3"
+  }
+}

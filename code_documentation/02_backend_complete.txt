@@ -1,0 +1,2511 @@
+BACKEND CODE DOCUMENTATION
+==========================
+
+========================================
+BACKEND CONFIGURATION FILES
+========================================
+
+--- package.json ---
+
+{
+  "name": "parkarlabs-backend",
+  "version": "1.0.0",
+  "description": "ParkarLabs Backend API Server",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "jest",
+    "migrate:up": "cd ../db && npm run migrate:up",
+    "migrate:down": "cd ../db && npm run migrate:down",
+    "seed": "cd ../db && npm run seed:all"
+  },
+  "keywords": [
+    "lab",
+    "lxc",
+    "containers",
+    "education"
+  ],
+  "author": "ParkarLabs Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.0.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-session": "^1.17.3",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "passport": "^0.7.0",
+    "pg": "^8.11.3",
+    "ssh2": "^1.17.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3"
+  }
+}
+
+--- .env (sanitized) ---
+
+# Backend Environment Configuration
+NODE_ENV=development
+PORT=5000
+
+# Database Configuration (same as db/.env)
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=parkarlabs_dev
+PGUSER=dev_user
+PGPASSWORD=***
+DATABASE_URL=postgresql://dev_user:temp123@localhost:5432/parkarlabs_dev
+
+# JWT Configuration
+JWT_SECRET=parkarlabs_jwt_secret_key_2024
+JWT_EXPIRES_IN=24h
+JWT_REFRESH_EXPIRES_IN=7d
+
+# Azure AD Configuration (will set up later)
+AZURE_CLIENT_ID=your_azure_client_id
+AZURE_CLIENT_SECRET=your_azure_client_secret
+AZURE_TENANT_ID=your_azure_tenant_id
+AZURE_REDIRECT_URI=http://localhost:3000/auth/callback
+
+# LXC Configuration
+LXC_HOST=localhost
+LXC_USER=root
+LXC_BRIDGE=lxcbr0
+
+# Session Configuration
+SESSION_SECRET=parkarlabs_session_secret_key_2024
+
+# API Rate Limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+
+# File Upload
+MAX_FILE_SIZE=10485760
+UPLOAD_PATH=./uploads
+
+# Monitoring
+LOG_LEVEL=info
+
+# Development fallback (for SSH/dev mode)
+DEV_SSH_FALLBACK=true
+
+========================================
+MAIN SERVER FILE
+========================================
+
+--- src/server.js ---
+// src/server.js
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const http = require('http'); // use http server so WebSocket can attach
+
+// Import configurations and utilities
+const { testConnection, closePool } = require('../config/database');
+const { initWebsocket } = require('./services/websocket'); // new service
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Security middleware
+app.use(helmet());
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? ['https://yourdomain.com']
+    : ['http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100, // limit each IP
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', limiter);
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Logging middleware
+if (process.env.NODE_ENV !== 'test') {
+  app.use(morgan('combined'));
+}
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    const dbConnected = await testConnection();
+    res.status(200).json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV,
+      database: dbConnected ? 'Connected' : 'Disconnected',
+      version: '1.0.0'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      message: 'Health check failed',
+      error: error.message
+    });
+  }
+});
+
+// API routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/admin', require('./routes/admin'));
+app.use('/api/user', require('./routes/user'));
+app.use('/api/courses', require('./routes/courses'));
+app.use('/api/tasks', require('./routes/tasks'));
+app.use('/api/containers', require('./routes/containers'));
+
+// Added users routes (A1.3 update)
+const usersRoutes = require('./routes/users');
+app.use('/api/users', usersRoutes);
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.originalUrl} not found`,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Global error handler
+app.use((error, req, res, next) => {
+  console.error('Global error handler:', error);
+
+  res.status(error.status || 500).json({
+    success: false,
+    message: error.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+  });
+});
+
+// Graceful shutdown helpers
+let shuttingDown = false;
+const gracefulShutdown = async (signal, server) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received, shutting down gracefully...`);
+
+  try {
+    // stop accepting new connections
+    server.close(async (err) => {
+      if (err) {
+        console.error('Error closing HTTP server:', err);
+        process.exit(1);
+      }
+
+      // close DB pool
+      try {
+        await closePool();
+        console.log('Database pool closed.');
+      } catch (dbErr) {
+        console.error('Error closing DB pool:', dbErr);
+      }
+
+      console.log('Shutdown complete.');
+      process.exit(0);
+    });
+
+    // force exit after a timeout if shutdown hangs
+    setTimeout(() => {
+      console.warn('Forcing shutdown after timeout.');
+      process.exit(1);
+    }, parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 30 * 1000);
+  } catch (shutdownErr) {
+    console.error('Error during graceful shutdown:', shutdownErr);
+    process.exit(1);
+  }
+};
+
+// Start server (use http server so WebSocket can attach)
+const startServer = async () => {
+  try {
+    // Test database connection
+    const dbConnected = await testConnection();
+    if (!dbConnected) {
+      throw new Error('Cannot connect to database');
+    }
+
+    const server = http.createServer(app);
+
+    // initialize websockets (may throw, it's ok)
+    try {
+      initWebsocket(server);
+      console.log('WebSocket service initialized.');
+    } catch (e) {
+      console.warn('WebSocket init failed (continuing without WS):', e.message || e);
+    }
+
+    server.listen(PORT, () => {
+      console.log(`
+🚀 ParkarLabs Backend Server Started!
+📍 Environment: ${process.env.NODE_ENV}
+🌐 Server: http://localhost:${PORT}
+💾 Database: ${process.env.PGDATABASE}
+📊 Health: http://localhost:${PORT}/health
+      `);
+    });
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM', server));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT', server));
+
+    server.on('error', (err) => {
+      console.error('Server error:', err);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error.message);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
+
+module.exports = app;
+
+========================================
+CONTROLLERS
+========================================
+
+
+--- auth.js ---
+
+// src/controllers/auth.js
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { query } = require('../../config/database');
+
+// Generate JWT token
+const generateToken = (userId, email, role) => {
+  return jwt.sign(
+    { userId, email, role },
+    process.env.JWT_SECRET || 'parkarlabs_jwt_secret_key_2024',
+    { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+  );
+};
+
+// User registration function
+const register = async (req, res) => {
+  try {
+    const { name, email, password, confirmPassword } = req.body;
+
+    // Input validation
+    if (!name || !email || !password || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fields are required'
+      });
+    }
+
+    // Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    // Password validation
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long'
+      });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Passwords do not match'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await query(`
+      SELECT id, email FROM users WHERE email = $1
+    `, [email.toLowerCase()]);
+
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Hash password
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Get default employee role
+    const roleResult = await query(`
+      SELECT id FROM roles WHERE name = 'employee' LIMIT 1
+    `);
+
+    if (roleResult.rows.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Default role not found. Please contact administrator.'
+      });
+    }
+
+    const defaultRoleId = roleResult.rows[0].id;
+
+    // Generate Azure AD ID (for now, use email-based UUID)
+    const crypto = require('crypto');
+    const azureAdId = crypto.createHash('sha256').update(email.toLowerCase()).digest('hex').substring(0, 32);
+
+    // Create user in transaction
+    await query('BEGIN');
+    
+    try {
+      const userResult = await query(`
+        INSERT INTO users (azure_ad_id, name, email, role_id, status, created_at)
+        VALUES ($1, $2, $3, $4, 'active', NOW())
+        RETURNING id, name, email, status, created_at
+      `, [azureAdId, name.trim(), email.toLowerCase(), defaultRoleId]);
+
+      const newUser = userResult.rows[0];
+
+      // Store password hash in a separate credential store using existing sessions table structure
+      // We'll use the sessions table to store password info temporarily
+      await query(`
+        INSERT INTO sessions (user_id, provider, provider_account_id, meta, created_at)
+        VALUES ($1, 'local', $2, $3, NOW())
+      `, [newUser.id, email.toLowerCase(), JSON.stringify({ password_hash: hashedPassword })]);
+
+      // Create audit log
+      await query(`
+        INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
+        VALUES ($1, 'REGISTER', 'user', $2, $3, NOW())
+      `, [newUser.id, newUser.id.toString(), JSON.stringify({
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        registrationMethod: 'email'
+      })]);
+
+      await query('COMMIT');
+
+      res.status(201).json({
+        success: true,
+        message: 'User registered successfully. Please login with your credentials.',
+        data: {
+          user: {
+            id: newUser.id,
+            name: newUser.name,
+            email: newUser.email,
+            status: newUser.status,
+            role: 'employee'
+          }
+        }
+      });
+
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed. Please try again.',
+      error: error.message
+    });
+  }
+};
+
+// Updated login function with password verification
+const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Input validation
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
+    }
+
+    // Get user with role information
+    const userResult = await query(`
+      SELECT u.id, u.email, u.name, u.azure_ad_id, u.status, r.name as role_name
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      WHERE u.email = $1 AND u.status = 'active'
+      LIMIT 1
+    `, [email.toLowerCase()]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Check for stored password hash in sessions table
+    let isValidPassword = false;
+    
+    const sessionResult = await query(`
+      SELECT meta FROM sessions 
+      WHERE user_id = $1 AND provider = 'local'
+      ORDER BY created_at DESC LIMIT 1
+    `, [user.id]);
+
+    if (sessionResult.rows.length > 0 && sessionResult.rows[0].meta?.password_hash) {
+      // Check hashed password (for registered users)
+      isValidPassword = await bcrypt.compare(password, sessionResult.rows[0].meta.password_hash);
+    } else {
+      // Fallback for existing demo accounts
+      isValidPassword = password === 'temp123';
+    }
+
+    if (!isValidPassword) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user.id, user.email, user.role_name);
+
+    // Log the login attempt
+    await query(`
+      INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
+      VALUES ($1, 'LOGIN', 'user', $2, $3, NOW())
+    `, [user.id, user.id.toString(), JSON.stringify({ ip: req.ip, userAgent: req.get('User-Agent') })]);
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role_name,
+          status: user.status
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Login failed',
+      error: error.message
+    });
+  }
+};
+
+// Get current user profile
+const getProfile = async (req, res) => {
+  try {
+    const userId = req.user.userId; // From JWT middleware
+
+    const result = await query(`
+      SELECT u.id, u.name, u.email, u.status, u.created_at,
+             r.name as role_name, r.description as role_description
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      WHERE u.id = $1
+    `, [userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const user = result.rows[0];
+
+    res.json({
+      success: true,
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role_name,
+        roleDescription: user.role_description,
+        status: user.status,
+        createdAt: user.created_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Get profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user profile',
+      error: error.message
+    });
+  }
+};
+
+// Logout function
+const logout = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (userId) {
+      // Log the logout attempt
+      await query(`
+        INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
+        VALUES ($1, 'LOGOUT', 'user', $2, $3, NOW())
+      `, [userId, userId.toString(), JSON.stringify({ ip: req.ip })]);
+    }
+
+    res.json({
+      success: true,
+      message: 'Logout successful'
+    });
+
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Logout failed',
+      error: error.message
+    });
+  }
+};
+
+// Verify token endpoint
+const verifyToken = async (req, res) => {
+  try {
+    // Token verification is handled by middleware
+    res.json({
+      success: true,
+      message: 'Token is valid',
+      user: req.user
+    });
+  } catch (error) {
+    res.status(401).json({
+      success: false,
+      message: 'Invalid token'
+    });
+  }
+};
+
+module.exports = {
+  register,
+  login,
+  getProfile,
+  logout,
+  verifyToken
+};
+
+--- containers.js ---
+
+// backend/src/controllers/containers.js
+const containersDb = require('../services/containers_db');
+const { query } = require('../services/database'); // adjust if your query helper lives elsewhere
+const { launchLabContainer } = require('../services/lxc/launcher');
+const crypto = require('crypto');
+
+function containerName(prefix = 'lab') {
+  const suffix = crypto.randomBytes(3).toString('hex'); // e.g. lab-5f3a91
+  return `${prefix}-${suffix}`;
+}
+
+/**
+ * POST /api/containers/launch
+ * body: { taskId: number, dependencies: string[], sshPublicKey?: string }
+ */
+exports.launch = async (req, res, next) => {
+  const { taskId, dependencies = [], sshPublicKey } = req.body || {};
+  const userId = req.user?.id || req.user?.userId;
+
+  if (!Array.isArray(dependencies)) {
+    return res
+      .status(400)
+      .json({ success: false, message: 'dependencies must be an array' });
+  }
+
+  // validate dependency keys against our allow-list
+  const allowed = ['node', 'postgresql', 'nginx', 'redis', 'docker', 'mongodb'];
+  const invalid = dependencies.filter((d) => !allowed.includes(d));
+  if (invalid.length) {
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: `Invalid dependencies: ${invalid.join(', ')}`
+      });
+  }
+
+  const name = containerName('lab');
+
+  try {
+    await query('BEGIN');
+
+    // Reserve quota/record row as "creating"
+    const result = await containersDb.createContainerRecord(null, {
+      containerName: name,
+      image: 'ubuntu:24.04',
+      taskId,
+      ownerUserId: userId,
+      status: 'creating',
+      externalId: name,
+      metadata: { dependencies }
+    });
+    const containerId = result.rows[0].id;
+
+    // (optional) reserve quota via your DB helper, if you have one:
+    // await query('SELECT check_and_reserve_quota($1, $2)', [userId, 'container']);
+
+    // Launch the LXC container (cloud-init installs deps, sets up SSH)
+    const info = await launchLabContainer({
+      name,
+      dependencies,
+      userPublicKey: sshPublicKey || null
+    });
+
+    // Update DB → running, save IP + metadata
+    await query(
+      `UPDATE containers
+         SET status_id = (SELECT id FROM container_statuses WHERE name='running' LIMIT 1),
+             ip_address = $2,
+             metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{deps}', to_jsonb($3::text[]))
+       WHERE id = $1`,
+      [containerId, info.ip, dependencies]
+    );
+
+    // Audit log (optional)
+    await query(
+      `INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
+       VALUES ($1, 'launch_container', 'container', $2, $3::jsonb, NOW())`,
+      [userId, containerId, JSON.stringify({ name, dependencies })]
+    );
+
+    await query('COMMIT');
+
+    // Return SSH details to the frontend
+    return res.status(201).json({
+      success: true,
+      container: {
+        id: containerId,
+        name,
+        status: 'running',
+        ip: info.ip
+      },
+      ssh: info.ssh,         // { user, host, port, privateKey?(if generated), generatedKey }
+      hostKey: info.hostKey  // ssh-keyscan fingerprint (optional display)
+    });
+  } catch (err) {
+    try {
+      await query('ROLLBACK');
+    } catch {}
+    console.error('Launch error:', err);
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: 'Failed to launch container',
+        error: err.message
+      });
+  }
+};
+
+--- courses.js ---
+
+// src/controllers/courses.js
+const { query } = require('../../config/database');
+
+// Get all courses
+const getCourses = async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT 
+        c.id, c.title, c.slug, c.description, c.visibility, c.created_at,
+        u.name as created_by_name,
+        COUNT(m.id) as module_count,
+        COUNT(a.id) as assignment_count
+      FROM courses c
+      LEFT JOIN users u ON c.created_by = u.id
+      LEFT JOIN modules m ON c.id = m.course_id
+      LEFT JOIN assignments a ON a.task_id IN (
+        SELECT t.id FROM tasks t WHERE t.related_course_id = c.id
+      )
+      GROUP BY c.id, c.title, c.slug, c.description, c.visibility, c.created_at, u.name
+      ORDER BY c.created_at DESC
+    `);
+    
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rowCount
+    });
+  } catch (error) {
+    console.error('Get courses error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch courses',
+      error: error.message
+    });
+  }
+};
+
+// Get single course by ID
+const getCourse = async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    
+    // Get course with modules
+    const courseResult = await query(`
+      SELECT 
+        c.id, c.title, c.slug, c.description, c.visibility, c.created_at,
+        u.name as created_by_name
+      FROM courses c
+      LEFT JOIN users u ON c.created_by = u.id
+      WHERE c.id = $1
+    `, [courseId]);
+    
+    if (courseResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+    }
+    
+    // Get modules for this course
+    const modulesResult = await query(`
+      SELECT id, title, content, position, created_at
+      FROM modules 
+      WHERE course_id = $1 
+      ORDER BY position ASC
+    `, [courseId]);
+    
+    const course = courseResult.rows[0];
+    course.modules = modulesResult.rows;
+    
+    res.json({
+      success: true,
+      data: course
+    });
+  } catch (error) {
+    console.error('Get course error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch course',
+      error: error.message
+    });
+  }
+};
+
+// Create new course
+const createCourse = async (req, res) => {
+  try {
+    const { title, description, visibility = 'private' } = req.body;
+    const createdBy = req.user.userId;
+    
+    // Generate slug from title
+    const slug = title.toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+    
+    // Check if slug already exists
+    const slugCheck = await query('SELECT id FROM courses WHERE slug = $1', [slug]);
+    if (slugCheck.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Course with this title already exists'
+      });
+    }
+    
+    const result = await query(`
+      INSERT INTO courses (title, slug, description, created_by, visibility, created_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      RETURNING id, title, slug, description, visibility, created_at
+    `, [title, slug, description, createdBy, visibility]);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Course created successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Create course error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create course',
+      error: error.message
+    });
+  }
+};
+
+// Update course
+const updateCourse = async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    const { title, description, visibility } = req.body;
+    
+    // Generate new slug if title changed
+    let slug;
+    if (title) {
+      slug = title.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+    }
+    
+    const result = await query(`
+      UPDATE courses 
+      SET title = COALESCE($1, title),
+          slug = COALESCE($2, slug),
+          description = COALESCE($3, description),
+          visibility = COALESCE($4, visibility)
+      WHERE id = $5
+      RETURNING id, title, slug, description, visibility, created_at
+    `, [title, slug, description, visibility, courseId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Course updated successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Update course error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update course',
+      error: error.message
+    });
+  }
+};
+
+// Delete course
+const deleteCourse = async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    
+    const result = await query('DELETE FROM courses WHERE id = $1 RETURNING id', [courseId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Course deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete course error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete course',
+      error: error.message
+    });
+  }
+};
+
+// Add module to course
+const addModule = async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    const { title, content, position } = req.body;
+    
+    const result = await query(`
+      INSERT INTO modules (course_id, title, content, position, created_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      RETURNING id, title, content, position, created_at
+    `, [courseId, title, content, position || 0]);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Module added successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Add module error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add module',
+      error: error.message
+    });
+  }
+};
+
+// Update module
+const updateModule = async (req, res) => {
+  try {
+    const { id: courseId, moduleId } = req.params;
+    const { title, content, position } = req.body;
+    
+    const result = await query(`
+      UPDATE modules 
+      SET title = COALESCE($1, title),
+          content = COALESCE($2, content),
+          position = COALESCE($3, position)
+      WHERE id = $4 AND course_id = $5
+      RETURNING id, title, content, position, created_at
+    `, [title, content, position, moduleId, courseId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Module not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Module updated successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Update module error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update module',
+      error: error.message
+    });
+  }
+};
+
+// Delete module
+const deleteModule = async (req, res) => {
+  try {
+    const { id: courseId, moduleId } = req.params;
+    
+    const result = await query(
+      'DELETE FROM modules WHERE id = $1 AND course_id = $2 RETURNING id',
+      [moduleId, courseId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Module not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Module deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete module error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete module',
+      error: error.message
+    });
+  }
+};
+
+module.exports = {
+  getCourses,
+  getCourse,
+  createCourse,
+  updateCourse,
+  deleteCourse,
+  addModule,
+  updateModule,
+  deleteModule
+};
+
+--- tasks.js ---
+
+// src/controllers/tasks.js
+const { query } = require('../../config/database');
+
+// Get all tasks (admin/manager only)
+const getAllTasks = async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT t.*, u.name as created_by_name, c.title as course_title,
+             COUNT(a.id) as assignment_count,
+             COUNT(CASE WHEN a.status = 'assigned' THEN 1 END) as pending_count,
+             COUNT(CASE WHEN a.status = 'completed' THEN 1 END) as completed_count
+      FROM tasks t
+      LEFT JOIN users u ON t.created_by = u.id
+      LEFT JOIN courses c ON t.related_course_id = c.id
+      LEFT JOIN assignments a ON t.id = a.task_id
+      GROUP BY t.id, u.name, c.title
+      ORDER BY t.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching tasks:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tasks',
+      error: error.message
+    });
+  }
+};
+
+// Get user's assigned tasks - FIXED VERSION
+const getMyTasks = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const result = await query(`
+      SELECT a.id as assignment_id, a.status, a.due_date, a.created_at as assigned_at,
+             t.id as task_id, t.title, t.description,
+             c.title as course_title, c.slug as course_slug,
+             u.name as assigned_by_name
+      FROM assignments a
+      JOIN tasks t ON a.task_id = t.id
+      LEFT JOIN courses c ON t.related_course_id = c.id
+      LEFT JOIN users u ON a.assigned_by = u.id
+      WHERE a.assigned_to_user_id = $1
+      ORDER BY a.created_at DESC
+    `, [userId]);
+
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching user tasks:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tasks',
+      error: error.message
+    });
+  }
+};
+
+// Create new task
+const createTask = async (req, res) => {
+  try {
+    const { title, description, relatedCourseId } = req.body;
+    const createdBy = req.user.userId;
+
+    // Validate input
+    if (!title || !description) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title and description are required'
+      });
+    }
+
+    const result = await query(`
+      INSERT INTO tasks (title, description, created_by, related_course_id, created_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      RETURNING id, title, description, created_at
+    `, [title, description, createdBy, relatedCourseId || null]);
+
+    res.json({
+      success: true,
+      message: 'Task created successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error creating task:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create task',
+      error: error.message
+    });
+  }
+};
+
+// Assign task to users - FIXED VERSION
+const assignTask = async (req, res) => {
+  try {
+    const { id } = req.params; // task ID
+    const { userIds, dueDate, notes } = req.body;
+    const assignedBy = req.user.userId;
+
+    console.log('Assign task called:', { id, userIds, dueDate, assignedBy });
+
+    // Validate input
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one user must be selected'
+      });
+    }
+
+    // Verify task exists
+    const taskResult = await query(
+      'SELECT id, title FROM tasks WHERE id = $1',
+      [id]
+    );
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    const task = taskResult.rows[0];
+
+    // Verify users exist and get their details
+    const usersResult = await query(
+      'SELECT id, name, email FROM users WHERE id = ANY($1) AND status = $2',
+      [userIds, 'active']
+    );
+
+    if (usersResult.rows.length !== userIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more users not found or inactive'
+      });
+    }
+
+    // Create assignments for each user
+    const assignments = [];
+    for (const userId of userIds) {
+      try {
+        // Check if assignment already exists
+        const existingResult = await query(
+          'SELECT id FROM assignments WHERE task_id = $1 AND assigned_to_user_id = $2',
+          [id, userId]
+        );
+
+        if (existingResult.rows.length === 0) {
+          // Create new assignment - REMOVED ON CONFLICT clause that was causing issues
+          const assignmentResult = await query(`
+            INSERT INTO assignments (
+              task_id, assigned_to_user_id, assigned_by, status, due_date, metadata, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            RETURNING id, created_at
+          `, [
+            id,
+            userId, 
+            assignedBy,
+            'assigned',
+            dueDate || null,
+            JSON.stringify({ notes: notes || '' })
+          ]);
+
+          assignments.push({
+            id: assignmentResult.rows[0].id,
+            taskId: id,
+            userId: userId,
+            status: 'assigned',
+            createdAt: assignmentResult.rows[0].created_at
+          });
+        } else {
+          console.log(`Assignment already exists for user ${userId} and task ${id}`);
+        }
+      } catch (assignError) {
+        console.error(`Error creating assignment for user ${userId}:`, assignError);
+        // Continue with other users
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Task "${task.title}" assigned to ${assignments.length} user(s)`,
+      data: {
+        taskId: id,
+        taskTitle: task.title,
+        assignments: assignments,
+        assignedBy: req.user.name
+      }
+    });
+
+  } catch (error) {
+    console.error('Assign task error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to assign task',
+      error: error.message
+    });
+  }
+};
+
+// Update task status
+const updateTaskStatus = async (req, res) => {
+  try {
+    const { id } = req.params; // assignment ID
+    const { status } = req.body;
+    const userId = req.user.userId;
+
+    // Validate status
+    const validStatuses = ['assigned', 'in_progress', 'completed', 'blocked'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status'
+      });
+    }
+
+    // Verify assignment exists and belongs to user
+    const assignmentResult = await query(
+      'SELECT id, task_id, status FROM assignments WHERE id = $1 AND assigned_to_user_id = $2',
+      [id, userId]
+    );
+
+    if (assignmentResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Assignment not found or access denied'
+      });
+    }
+
+    // Update assignment status
+    await query(
+      'UPDATE assignments SET status = $1 WHERE id = $2',
+      [status, id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Task status updated successfully',
+      data: {
+        assignmentId: id,
+        newStatus: status
+      }
+    });
+  } catch (error) {
+    console.error('Error updating task status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update task status',
+      error: error.message
+    });
+  }
+};
+
+// Delete task
+const deleteTask = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Verify task exists
+    const taskResult = await query(
+      'SELECT id, title FROM tasks WHERE id = $1',
+      [id]
+    );
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    // Delete task (assignments will be deleted due to CASCADE)
+    await query('DELETE FROM tasks WHERE id = $1', [id]);
+
+    res.json({
+      success: true,
+      message: 'Task deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting task:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete task',
+      error: error.message
+    });
+  }
+};
+
+module.exports = {
+  getAllTasks,
+  getMyTasks,
+  createTask,
+  assignTask,
+  updateTaskStatus,
+  deleteTask
+};
+
+--- users.js ---
+
+// src/controllers/users.js
+const bcrypt = require('bcryptjs');
+const { query } = require('../../config/database');
+
+// Get all users with filtering and search
+const getAllUsers = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', role = '', status = '', sortBy = 'created_at', sortOrder = 'DESC' } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Build dynamic WHERE clause
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+    let paramCount = 0;
+
+    if (search) {
+      paramCount++;
+      whereClause += ` AND (u.name ILIKE $${paramCount} OR u.email ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+    }
+
+    if (role) {
+      paramCount++;
+      whereClause += ` AND r.name = $${paramCount}`;
+      params.push(role);
+    }
+
+    if (status) {
+      paramCount++;
+      whereClause += ` AND u.status = $${paramCount}`;
+      params.push(status);
+    }
+
+    // Valid sort columns
+    const validSortColumns = ['name', 'email', 'created_at', 'status'];
+    const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'created_at';
+    const order = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      ${whereClause}
+    `;
+    const countResult = await query(countQuery, params);
+    const totalUsers = parseInt(countResult.rows[0].total);
+
+    // Get users with pagination
+    paramCount++;
+    const limitParam = paramCount;
+    paramCount++;
+    const offsetParam = paramCount;
+
+    const usersQuery = `
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        u.azure_ad_id,
+        u.status,
+        u.created_at,
+        r.name as role_name,
+        r.description as role_description,
+        (SELECT COUNT(*) FROM assignments WHERE assigned_to_user_id = u.id) as total_assignments,
+        (SELECT COUNT(*) FROM assignments WHERE assigned_to_user_id = u.id AND status = 'completed') as completed_assignments,
+        (SELECT COUNT(*) FROM containers WHERE owner_user_id = u.id) as total_containers,
+        (SELECT COUNT(*) FROM containers WHERE owner_user_id = u.id AND status_id = (SELECT id FROM container_statuses WHERE name = 'running' LIMIT 1)) as running_containers
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      ${whereClause}
+      ORDER BY u.${sortColumn} ${order}
+      LIMIT $${limitParam} OFFSET $${offsetParam}
+    `;
+
+    params.push(limit, offset);
+    const usersResult = await query(usersQuery, params);
+
+    res.json({
+      success: true,
+      data: usersResult.rows,
+      pagination: {
+        total: totalUsers,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(totalUsers / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get all users error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch users',
+      error: error.message
+    });
+  }
+};
+
+// Get single user by ID
+const getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const userQuery = `
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        u.azure_ad_id,
+        u.status,
+        u.provisioning_pref,
+        u.created_at,
+        r.id as role_id,
+        r.name as role_name,
+        r.description as role_description,
+        (SELECT COUNT(*) FROM assignments WHERE assigned_to_user_id = u.id) as total_assignments,
+        (SELECT COUNT(*) FROM assignments WHERE assigned_to_user_id = u.id AND status = 'assigned') as pending_assignments,
+        (SELECT COUNT(*) FROM assignments WHERE assigned_to_user_id = u.id AND status = 'in_progress') as in_progress_assignments,
+        (SELECT COUNT(*) FROM assignments WHERE assigned_to_user_id = u.id AND status = 'completed') as completed_assignments,
+        (SELECT COUNT(*) FROM containers WHERE owner_user_id = u.id) as total_containers,
+        (SELECT COUNT(*) FROM containers WHERE owner_user_id = u.id AND status_id = (SELECT id FROM container_statuses WHERE name = 'running' LIMIT 1)) as running_containers,
+        (SELECT MAX(created_at) FROM audit_logs WHERE actor_user_id = u.id) as last_activity
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      WHERE u.id = $1
+    `;
+
+    const result = await query(userQuery, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Get recent activities
+    const activitiesQuery = `
+      SELECT
+        action,
+        target_type,
+        target_id,
+        created_at,
+        meta
+      FROM audit_logs
+      WHERE actor_user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 10
+    `;
+
+    const activitiesResult = await query(activitiesQuery, [id]);
+
+    res.json({
+      success: true,
+      data: {
+        ...result.rows[0],
+        recent_activities: activitiesResult.rows
+      }
+    });
+
+  } catch (error) {
+    console.error('Get user by ID error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch user',
+      error: error.message
+    });
+  }
+};
+
+// Create new user
+const createUser = async (req, res) => {
+  try {
+    const { name, email, role_id, azure_ad_id, provisioning_pref } = req.body;
+
+    // Check if email already exists
+    const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+
+    // Check if azure_ad_id already exists (if provided)
+    if (azure_ad_id) {
+      const existingAzureUser = await query('SELECT id FROM users WHERE azure_ad_id = $1', [azure_ad_id]);
+      if (existingAzureUser.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Azure AD ID already exists'
+        });
+      }
+    }
+
+    // Verify role exists
+    const roleCheck = await query('SELECT id, name FROM roles WHERE id = $1', [role_id]);
+    if (roleCheck.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role ID'
+      });
+    }
+
+    // Create user
+    const insertQuery = `
+      INSERT INTO users (
+        name,
+        email,
+        role_id,
+        azure_ad_id,
+        provisioning_pref,
+        status,
+        created_at
+      ) VALUES ($1, $2, $3, $4, $5, 'active', NOW())
+      RETURNING id, name, email, azure_ad_id, status, created_at
+    `;
+
+    const result = await query(insertQuery, [
+      name,
+      email,
+      role_id,
+      azure_ad_id || `local_${Date.now()}`,
+      provisioning_pref ? JSON.stringify(provisioning_pref) : null
+    ]);
+
+    // Log the creation
+    await query(
+      `INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
+       VALUES ($1, 'CREATE', 'user', $2, $3, NOW())`,
+      [req.user.userId, result.rows[0].id.toString(), JSON.stringify({ created_by: req.user.name })]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      data: {
+        ...result.rows[0],
+        role_name: roleCheck.rows[0].name
+      }
+    });
+
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create user',
+      error: error.message
+    });
+  }
+};
+
+// Update user
+const updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, role_id, status, provisioning_pref } = req.body;
+
+    // Check if user exists
+    const existingUser = await query('SELECT * FROM users WHERE id = $1', [id]);
+    if (existingUser.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if email is being changed and if it conflicts
+    if (email && email !== existingUser.rows[0].email) {
+      const emailCheck = await query('SELECT id FROM users WHERE email = $1 AND id != $2', [email, id]);
+      if (emailCheck.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already exists'
+        });
+      }
+    }
+
+    // Verify role exists if being changed
+    if (role_id) {
+      const roleCheck = await query('SELECT id, name FROM roles WHERE id = $1', [role_id]);
+      if (roleCheck.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid role ID'
+        });
+      }
+    }
+
+    // Build update query dynamically
+    const updates = [];
+    const params = [];
+    let paramCount = 0;
+
+    if (name) {
+      paramCount++;
+      updates.push(`name = $${paramCount}`);
+      params.push(name);
+    }
+
+    if (email) {
+      paramCount++;
+      updates.push(`email = $${paramCount}`);
+      params.push(email);
+    }
+
+    if (role_id) {
+      paramCount++;
+      updates.push(`role_id = $${paramCount}`);
+      params.push(role_id);
+    }
+
+    if (status) {
+      paramCount++;
+      updates.push(`status = $${paramCount}`);
+      params.push(status);
+    }
+
+    if (provisioning_pref) {
+      paramCount++;
+      updates.push(`provisioning_pref = $${paramCount}`);
+      params.push(JSON.stringify(provisioning_pref));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update'
+      });
+    }
+
+    paramCount++;
+    params.push(id);
+
+    const updateQuery = `
+      UPDATE users
+      SET ${updates.join(', ')}
+      WHERE id = $${paramCount}
+      RETURNING id, name, email, azure_ad_id, status, created_at
+    `;
+
+    const result = await query(updateQuery, params);
+
+    // Log the update
+    await query(
+      `INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
+       VALUES ($1, 'UPDATE', 'user', $2, $3, NOW())`,
+      [req.user.userId, id, JSON.stringify({ updated_by: req.user.name, changes: req.body })]
+    );
+
+    res.json({
+      success: true,
+      message: 'User updated successfully',
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update user',
+      error: error.message
+    });
+  }
+};
+
+// Delete user (soft delete by setting status to 'disabled')
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if user exists
+    const existingUser = await query('SELECT * FROM users WHERE id = $1', [id]);
+    if (existingUser.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Prevent self-deletion
+    if (parseInt(id) === req.user.userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete your own account'
+      });
+    }
+
+    // Soft delete by setting status to 'disabled'
+    const updateQuery = `
+      UPDATE users
+      SET status = 'disabled'
+      WHERE id = $1
+      RETURNING id, name, email, status
+    `;
+
+    const result = await query(updateQuery, [id]);
+
+    // Log the deletion
+    await query(
+      `INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
+       VALUES ($1, 'DELETE', 'user', $2, $3, NOW())`,
+      [req.user.userId, id, JSON.stringify({ deleted_by: req.user.name })]
+    );
+
+    res.json({
+      success: true,
+      message: 'User deleted successfully',
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete user',
+      error: error.message
+    });
+  }
+};
+
+// Get available roles for user creation/editing
+const getRoles = async (req, res) => {
+  try {
+    const rolesQuery = `
+      SELECT id, name, description
+      FROM roles
+      ORDER BY name
+    `;
+
+    const result = await query(rolesQuery);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+
+  } catch (error) {
+    console.error('Get roles error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch roles',
+      error: error.message
+    });
+  }
+};
+
+// Get user statistics
+const getUserStats = async (req, res) => {
+  try {
+    const statsQuery = `
+      SELECT 
+        COUNT(*) as total_users,
+        COUNT(*) FILTER (WHERE u.status = 'active') as active_users,
+        COUNT(*) FILTER (WHERE u.status = 'disabled') as disabled_users,
+        COUNT(*) FILTER (WHERE r.name = 'admin') as admin_users,
+        COUNT(*) FILTER (WHERE r.name = 'manager') as manager_users,
+        COUNT(*) FILTER (WHERE r.name = 'employee') as employee_users,
+        COUNT(*) FILTER (WHERE u.created_at >= CURRENT_DATE - INTERVAL '30 days') as new_users_this_month,
+        COUNT(*) FILTER (WHERE u.created_at >= CURRENT_DATE - INTERVAL '7 days') as new_users_this_week
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+    `;
+
+    const result = await query(statsQuery);
+
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Get user stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch user statistics',
+      error: error.message
+    });
+  }
+};
+
+module.exports = {
+  getAllUsers,
+  getUserById,
+  createUser,
+  updateUser,
+  deleteUser,
+  getRoles,
+  getUserStats
+};
+
+========================================
+ROUTES
+========================================
+
+
+--- admin.js ---
+
+// src/routes/admin.js
+const express = require('express');
+const { query } = require('../../config/database');
+const { requireManager } = require('../middleware/auth');
+const router = express.Router();
+
+// Apply auth middleware to all admin routes
+router.use(requireManager);
+
+// Admin dashboard stats
+router.get('/test', async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT 
+        (SELECT COUNT(*) FROM users) as total_users,
+        (SELECT COUNT(*) FROM courses) as total_courses,
+        (SELECT COUNT(*) FROM containers) as total_containers,
+        (SELECT COUNT(*) FROM containers WHERE status_id = (SELECT id FROM container_statuses WHERE name='running' LIMIT 1)) as running_containers,
+        (SELECT COUNT(*) FROM assignments WHERE status = 'assigned') as pending_assignments,
+        (SELECT COUNT(*) FROM assignments WHERE status = 'completed') as completed_assignments
+    `);
+    
+    res.json({
+      success: true,
+      message: 'Admin stats retrieved successfully',
+      stats: result.rows[0],
+      timestamp: new Date().toISOString(),
+      requestedBy: req.user?.name || 'Unknown'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Admin stats query failed',
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;
+
+--- auth.js ---
+
+// src/routes/auth.js
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const authController = require('../controllers/auth');
+const { requireAuth } = require('../middleware/auth');
+const { query } = require('../../config/database');
+
+const router = express.Router();
+
+// Validation middleware
+const registerValidation = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Name must be between 2 and 100 characters'),
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters long'),
+  body('confirmPassword')
+    .custom((value, { req }) => {
+      if (value !== req.body.password) {
+        throw new Error('Passwords do not match');
+      }
+      return true;
+    })
+];
+
+const loginValidation = [
+  body('email')
+    .isLength({ min: 1 })
+    .withMessage('Email is required')
+    .trim(),
+  body('password')
+    .isLength({ min: 1 })
+    .withMessage('Password is required')
+];
+
+// Helper middleware to handle validation errors
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array()
+    });
+  }
+  next();
+};
+
+// Registration endpoint
+router.post('/register', registerValidation, handleValidationErrors, authController.register);
+
+// Login endpoint
+router.post('/login', loginValidation, handleValidationErrors, authController.login);
+
+// Get current user profile (protected)
+router.get('/profile', requireAuth, authController.getProfile);
+
+// Logout endpoint (protected)
+router.post('/logout', requireAuth, authController.logout);
+
+// Verify token endpoint (protected)
+router.get('/verify', requireAuth, authController.verifyToken);
+
+// Test endpoint (existing)
+router.get('/test', async (req, res) => {
+  try {
+    const result = await query('SELECT COUNT(*) as user_count FROM users');
+    res.json({
+      success: true,
+      message: 'Auth route working',
+      userCount: result.rows[0].user_count,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Database query failed',
+      error: error.message
+    });
+  }
+});
+
+// Get all users (existing - now with better formatting)
+router.get('/users', async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT u.id, u.name, u.email, u.status, u.created_at,
+             r.name as role_name, r.description as role_description
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      ORDER BY u.created_at DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rowCount,
+      message: 'Users retrieved successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch users',
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;
+
+--- containers.js ---
+
+/**
+ * backend/src/routes/containers.js
+ * Router for container operations (launch LXC, etc.)
+ */
+
+const express = require('express');
+const router = express.Router();
+const { body } = require('express-validator');
+
+const { requireAuth } = require('../middleware/auth'); // auth middleware must set req.user
+const containersController = require('../controllers/containers');
+
+const dependenciesValidation = [
+  body('dependencies').isArray().withMessage('dependencies must be an array'),
+  body('dependencies.*')
+    .isString()
+    .isIn(['node','postgresql','nginx','redis','docker','mongodb'])
+    .withMessage('Invalid dependency'),
+  body('taskId').optional().isInt().withMessage('taskId must be a number'),
+  body('sshPublicKey').optional().isString().isLength({ min: 32 }),
+];
+
+// POST /api/containers/launch
+router.post('/launch', requireAuth, dependenciesValidation, containersController.launch);
+
+module.exports = router;
+
+--- courses.js ---
+
+// src/routes/courses.js
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const coursesController = require('../controllers/courses');
+const { requireAuth, requireManager } = require('../middleware/auth');
+
+const router = express.Router();
+
+// Validation rules
+const courseValidation = [
+  body('title').isLength({ min: 1 }).withMessage('Title is required'),
+  body('description').optional().isLength({ max: 1000 }).withMessage('Description too long'),
+  body('visibility').optional().isIn(['private', 'public']).withMessage('Invalid visibility')
+];
+
+const moduleValidation = [
+  body('title').isLength({ min: 1 }).withMessage('Module title is required'),
+  body('content').optional(),
+  body('position').optional().isInt({ min: 0 }).withMessage('Position must be a positive integer')
+];
+
+// Middleware to check validation results
+const checkValidation = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array()
+    });
+  }
+  next();
+};
+
+// Public routes (all authenticated users can view courses)
+router.get('/', requireAuth, coursesController.getCourses);
+router.get('/:id', requireAuth, coursesController.getCourse);
+
+// Admin/Manager only routes (course management)
+router.post('/', requireManager, courseValidation, checkValidation, coursesController.createCourse);
+router.put('/:id', requireManager, courseValidation, checkValidation, coursesController.updateCourse);
+router.delete('/:id', requireManager, coursesController.deleteCourse);
+
+// Module management (Admin/Manager only)
+router.post('/:id/modules', requireManager, moduleValidation, checkValidation, coursesController.addModule);
+router.put('/:id/modules/:moduleId', requireManager, moduleValidation, checkValidation, coursesController.updateModule);
+router.delete('/:id/modules/:moduleId', requireManager, coursesController.deleteModule);
+
+module.exports = router;
+
+--- tasks.js ---
+
+// src/routes/tasks.js
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const { 
+  getAllTasks,
+  getMyTasks,
+  createTask,
+  assignTask,
+  updateTaskStatus,
+  deleteTask
+} = require('../controllers/tasks');
+const { requireAuth, requireManager } = require('../middleware/auth');
+
+const router = express.Router();
+
+// Validation rules
+const taskValidation = [
+  body('title').isLength({ min: 1 }).withMessage('Title is required'),
+  body('description').optional().isLength({ max: 2000 }).withMessage('Description too long'),
+  body('relatedCourseId').optional().isInt().withMessage('Invalid course ID')
+];
+
+const assignTaskValidation = [
+  body('userIds').isArray({ min: 1 }).withMessage('At least one user ID is required'),
+  body('dueDate').optional().isISO8601().withMessage('Invalid due date format'),
+  body('notes').optional().isLength({ max: 500 }).withMessage('Notes too long')
+];
+
+const statusUpdateValidation = [
+  body('status').isIn(['assigned', 'in_progress', 'completed', 'blocked']).withMessage('Invalid status')
+];
+
+// Middleware to check validation results
+const checkValidation = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array()
+    });
+  }
+  next();
+};
+
+// Task management routes (Admin/Manager only)
+router.get('/', requireManager, getAllTasks);
+router.post('/', requireManager, taskValidation, checkValidation, createTask);
+router.delete('/:id', requireManager, deleteTask);
+
+// Task assignment routes (Admin/Manager only)
+router.post('/:id/assign', requireManager, assignTaskValidation, checkValidation, assignTask);
+
+// User task routes (All authenticated users)
+router.get('/my-tasks', requireAuth, getMyTasks);
+router.patch('/:id/status', requireAuth, statusUpdateValidation, checkValidation, updateTaskStatus);
+
+module.exports = router;
+
+--- user.js ---
+
+// src/routes/user.js
+const express = require('express');
+const { query } = require('../../config/database');
+const { requireAuth } = require('../middleware/auth');
+const router = express.Router();
+
+// Apply auth middleware to all user routes
+router.use(requireAuth);
+
+// User dashboard stats
+router.get('/test', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const result = await query(`
+      SELECT 
+        COUNT(*) as my_assignments,
+        COUNT(CASE WHEN status = 'assigned' THEN 1 END) as pending_tasks,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_tasks,
+        COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress_tasks
+      FROM assignments 
+      WHERE assigned_to_user_id = $1
+    `, [userId]);
+    
+    res.json({
+      success: true,
+      message: 'User stats retrieved successfully',
+      stats: result.rows[0],
+      timestamp: new Date().toISOString(),
+      user: req.user.name
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'User stats query failed',
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;
+
+--- users.js ---
+
+// src/routes/users.js
+const express = require('express');
+const { body, param, query, validationResult } = require('express-validator');
+const usersController = require('../controllers/users');
+const { requireAuth, requireManager } = require('../middleware/auth');
+
+const router = express.Router();
+
+// Validation rules
+const createUserValidation = [
+  body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be between 2 and 100 characters'),
+  body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email'),
+  body('role_id').isInt({ min: 1 }).withMessage('Role ID must be a positive integer'),
+  body('azure_ad_id').optional().trim().isLength({ min: 1, max: 255 }).withMessage('Azure AD ID must be valid'),
+  body('provisioning_pref').optional().isObject().withMessage('Provisioning preferences must be an object')
+];
+
+const updateUserValidation = [
+  param('id').isInt({ min: 1 }).withMessage('Invalid user ID'),
+  body('name').optional().trim().isLength({ min: 2, max: 100 }).withMessage('Name must be between 2 and 100 characters'),
+  body('email').optional().isEmail().normalizeEmail().withMessage('Please provide a valid email'),
+  body('role_id').optional().isInt({ min: 1 }).withMessage('Role ID must be a positive integer'),
+  body('status').optional().isIn(['active', 'disabled', 'suspended']).withMessage('Invalid status'),
+  body('provisioning_pref').optional().isObject().withMessage('Provisioning preferences must be an object')
+];
+
+const getUserValidation = [
+  param('id').isInt({ min: 1 }).withMessage('Invalid user ID')
+];
+
+const getUsersQueryValidation = [
+  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+  query('search').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 100 }).withMessage('Search term too long'),
+  query('role').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 50 }).withMessage('Role filter too long'),
+  query('status').optional({ nullable: true, checkFalsy: true }).isIn(['active', 'disabled', 'suspended']).withMessage('Invalid status filter'),
+  query('sortBy').optional().isIn(['name', 'email', 'created_at', 'status']).withMessage('Invalid sort field'),
+  query('sortOrder').optional().isIn(['ASC', 'DESC']).withMessage('Sort order must be ASC or DESC')
+];
+
+// Middleware to check validation results
+const checkValidation = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array()
+    });
+  }
+  next();
+};
+
+// Routes
+// GET /api/users/stats - Get user statistics (Admin/Manager only)
+router.get('/stats', requireManager, usersController.getUserStats);
+
+// GET /api/users/roles - Get available roles (Admin/Manager only)
+router.get('/roles', requireManager, usersController.getRoles);
+
+// GET /api/users - Get all users with filtering and pagination (Admin/Manager only)
+router.get('/', requireManager, getUsersQueryValidation, checkValidation, usersController.getAllUsers);
+
+// GET /api/users/:id - Get single user by ID (Admin/Manager only)
+router.get('/:id', requireManager, getUserValidation, checkValidation, usersController.getUserById);
+
+// POST /api/users - Create new user (Admin/Manager only)
+router.post('/', requireManager, createUserValidation, checkValidation, usersController.createUser);
+
+// PUT /api/users/:id - Update user (Admin/Manager only)
+router.put('/:id', requireManager, updateUserValidation, checkValidation, usersController.updateUser);
+
+// DELETE /api/users/:id - Delete user (Admin/Manager only)
+router.delete('/:id', requireManager, getUserValidation, checkValidation, usersController.deleteUser);
+
+module.exports = router;
+
+========================================
+MIDDLEWARE
+========================================
+
+
+--- auth.js ---
+
+// src/middleware/auth.js
+const jwt = require('jsonwebtoken');
+const { query } = require('../../config/database');
+
+// Verify JWT token middleware
+const verifyToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      return res.status(401).json({
+        success: false,
+        message: 'No authorization header provided'
+      });
+    }
+
+    const token = authHeader.startsWith('Bearer ') 
+      ? authHeader.slice(7) 
+      : authHeader;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided'
+      });
+    }
+
+    // Verify JWT token
+    const jwtSecret = process.env.JWT_SECRET || 'parkarlabs_jwt_secret_key_2024';
+    const decoded = jwt.verify(token, jwtSecret);
+    
+    // Verify user still exists and is active
+    const userResult = await query(`
+      SELECT u.id, u.email, u.name, u.status, r.name as role_name
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      WHERE u.id = $1 AND u.status = 'active'
+      LIMIT 1
+    `, [decoded.userId]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found or inactive'
+      });
+    }
+
+    // Add user info to request object
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+      name: userResult.rows[0].name
+    };
+
+    next();
+    
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token expired'
+      });
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token'
+      });
+    }
+
+    console.error('Auth middleware error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Authentication failed',
+      error: error.message
+    });
+  }
+};
+
+// Role-based access control middleware
+const requireRole = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    const userRole = req.user.role;
+    
+    // Convert to array if single role passed
+    const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+    
+    if (!roles.includes(userRole)) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Required role: ${roles.join(' or ')}, your role: ${userRole}`
+      });
+    }
+
+    next();
+  };
+};
+
+// Admin only middleware (with token verification)
+const requireAdmin = (req, res, next) => {
+  // First verify the token, then check the role
+  verifyToken(req, res, (err) => {
+    if (err) return next(err);
+    
+    // Now check if user has admin role
+    const roleCheck = requireRole(['admin']);
+    roleCheck(req, res, next);
+  });
+};
+
+// Manager or Admin middleware (with token verification)
+const requireManager = (req, res, next) => {
+  // First verify the token, then check the role
+  verifyToken(req, res, (err) => {
+    if (err) return next(err);
+    
+    // Now check if user has admin or manager role
+    const roleCheck = requireRole(['admin', 'manager']);
+    roleCheck(req, res, next);
+  });
+};
+
+// Any authenticated user middleware
+const requireAuth = verifyToken;
+
+module.exports = {
+  verifyToken,
+  requireRole,
+  requireAdmin,
+  requireManager,
+  requireAuth
+};
+
+========================================
+CONFIGURATION
+========================================
+
+
+--- database.js ---
+
+// config/database.js
+require('dotenv').config();
+const { Pool } = require('pg');
+
+// Database configuration
+const dbConfig = {
+  host: process.env.PGHOST || 'localhost',
+  port: process.env.PGPORT || 5432,
+  database: process.env.PGDATABASE || 'parkarlabs_dev',
+  user: process.env.PGUSER || 'dev_user',
+  password: process.env.PGPASSWORD || 'temp123',
+  max: 20, // Maximum number of connections
+  idleTimeoutMillis: 30000, // Close idle connections after 30 seconds
+  connectionTimeoutMillis: 2000, // Return error after 2 seconds if connection could not be established
+};
+
+// Create connection pool
+const pool = new Pool(dbConfig);
+
+// Test database connection
+const testConnection = async () => {
+  try {
+    const client = await pool.connect();
+    const result = await client.query('SELECT NOW()');
+    console.log('✅ Database connected successfully at:', result.rows[0].now);
+    client.release();
+    return true;
+  } catch (error) {
+    console.error('❌ Database connection error:', error.message);
+    return false;
+  }
+};
+
+// Query helper function
+const query = async (text, params = []) => {
+  const start = Date.now();
+  try {
+    const result = await pool.query(text, params);
+    const duration = Date.now() - start;
+    console.log('📊 Query executed:', { text: text.substring(0, 50) + '...', duration: `${duration}ms`, rows: result.rowCount });
+    return result;
+  } catch (error) {
+    const duration = Date.now() - start;
+    console.error('❌ Query error:', { text: text.substring(0, 50) + '...', duration: `${duration}ms`, error: error.message });
+    throw error;
+  }
+};
+
+// Get database connection
+const getPool = () => pool;
+
+// Close all connections
+const closePool = async () => {
+  try {
+    await pool.end();
+    console.log('🔌 Database pool closed');
+  } catch (error) {
+    console.error('❌ Error closing database pool:', error.message);
+  }
+};
+
+module.exports = {
+  pool,
+  query,
+  getPool,
+  testConnection,
+  closePool,
+  dbConfig
+};

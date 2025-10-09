@@ -1,0 +1,2194 @@
+PARKARLABS DATABASE COMPLETE ANALYSIS
+=====================================
+Generated on: Thu Sep 25 11:21:42 UTC 2025
+
+
+=========================================
+CONFIGURATION FILES
+=========================================
+
+--- Package Configuration ---
+File: package.json
+
+{
+  "name": "parkarlabs-db",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "migrate:up": "node-pg-migrate up --migrations-dir ./migrations",
+    "migrate:down": "node-pg-migrate down --migrations-dir ./migrations",
+    "migrate:reset": "node-pg-migrate reset --migrations-dir ./migrations",
+    "seed": "node ./seeds/run-seeds.js",
+    "seed:sessions": "node ./seeds/run-session-seed.js",
+    "seed:all": "node ./seeds/run-seeds-full.js"
+  },
+  "dependencies": {
+    "csv-parse": "^6.1.0",
+    "dotenv": "^17.2.2",
+    "node-pg-migrate": "^7.5.0",
+    "pg": "^8.11.0"
+  }
+}
+
+--- End of Package Configuration ---
+
+--- Migration Configuration ---
+File: migrate.config.js
+
+require("dotenv").config();
+
+module.exports = {
+  migrationFolder: "./migrations",
+  direction: "up",
+  databaseUrl: {
+    host: process.env.PGHOST,
+    port: process.env.PGPORT,
+    database: process.env.PGDATABASE,
+    user: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+  },
+};
+
+--- End of Migration Configuration ---
+
+--- Initial SQL ---
+File: init.sql
+
+
+--- End of Initial SQL ---
+
+
+=========================================
+SCHEMAS
+=========================================
+
+--- Schema: ERD.md ---
+File: schemas/ERD.md
+
+# ParkarLabs ER Diagram (Draft)
+
+Entities:
+- Users
+- Teams
+- Roles
+- Permissions
+- Courses
+- Modules
+- Tasks
+- Assignments
+- Templates
+- DependencySets
+- Containers
+- AuditLogs
+- Metrics
+- ImportJobs
+- Snapshots
+
+Relationships:
+- Users <-> Teams (many-to-many via user_teams)
+- Users <-> Roles (1-to-many)
+- Courses -> Modules (1-to-many)
+- Assignments link Users <-> Tasks/Courses
+- Containers linked to Users + Templates
+- DependencySets link to Templates
+
+--- End of Schema: ERD.md ---
+
+--- Schema: init.sql ---
+File: schemas/init.sql
+
+-- Placeholder base schema for ParkarLabs
+-- Entities only (tables to be fleshed out later)
+
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    azure_ad_id TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin','manager','employee')),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE teams (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Linking users <-> teams
+CREATE TABLE user_teams (
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    team_id INT REFERENCES teams(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id, team_id)
+);
+
+--- End of Schema: init.sql ---
+
+
+=========================================
+MIGRATIONS (COMPLETE CONTENT)
+=========================================
+
+--- Migration: 1695470000000_create_core_types_and_tables.js ---
+File: migrations/1695470000000_create_core_types_and_tables.js
+
+/* Create core enum types and base tables: roles, permissions, role_permissions, teams, users */
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // role enum as lookup table (use a table instead of PG enum for flexibility)
+  pgm.createTable('roles', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true, unique: true },
+    description: { type: 'text' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('permissions', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true, unique: true },
+    description: { type: 'text' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('role_permissions', {
+    role_id: { type: 'integer', notNull: true, references: '"roles"', onDelete: 'cascade' },
+    permission_id: { type: 'integer', notNull: true, references: '"permissions"', onDelete: 'cascade' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') },
+  }, {
+    primaryKey: ['role_id', 'permission_id']
+  });
+
+  pgm.createTable('teams', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true, unique: true },
+    description: { type: 'text' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('users', {
+    id: { type: 'serial', primaryKey: true },
+    azure_ad_id: { type: 'text', notNull: true, unique: true },
+    name: { type: 'text', notNull: true },
+    email: { type: 'text', notNull: true, unique: true },
+    role_id: { type: 'integer', references: '"roles"', notNull: true, onDelete: 'restrict' },
+    public_ssh_key: { type: 'text' },
+    status: { type: 'text', notNull: true, default: 'active' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('user_teams', {
+    user_id: { type: 'integer', notNull: true, references: '"users"', onDelete: 'cascade' },
+    team_id: { type: 'integer', notNull: true, references: '"teams"', onDelete: 'cascade' },
+  }, {
+    primaryKey: ['user_id', 'team_id']
+  });
+
+  // Indexes
+  pgm.addIndex('users', 'email', { unique: true });
+  pgm.addIndex('users', 'azure_ad_id', { unique: true });
+  pgm.addIndex('users', 'role_id');
+  pgm.addIndex('user_teams', 'team_id');
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('user_teams', 'team_id');
+  pgm.dropIndex('users', ['role_id']);
+  pgm.dropIndex('users', 'azure_ad_id');
+  pgm.dropIndex('users', 'email');
+
+  pgm.dropTable('user_teams');
+  pgm.dropTable('users');
+  pgm.dropTable('teams');
+  pgm.dropTable('role_permissions');
+  pgm.dropTable('permissions');
+  pgm.dropTable('roles');
+};
+
+--- End of Migration: 1695470000000_create_core_types_and_tables.js ---
+
+--- Migration: 1695470100000_create_courses_modules.js ---
+File: migrations/1695470100000_create_courses_modules.js
+
+/* Create courses and modules tables */
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.createTable('courses', {
+    id: { type: 'serial', primaryKey: true },
+    title: { type: 'text', notNull: true },
+    slug: { type: 'text', notNull: true, unique: true },
+    description: { type: 'text' },
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    visibility: { type: 'text', notNull: true, default: 'private' }, /* private/public */
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('modules', {
+    id: { type: 'serial', primaryKey: true },
+    course_id: { type: 'integer', notNull: true, references: '"courses"', onDelete: 'cascade' },
+    title: { type: 'text', notNull: true },
+    content: { type: 'text' },
+    position: { type: 'integer', notNull: true, default: 0 },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('modules', ['course_id', 'position']);
+  pgm.addIndex('courses', 'slug', { unique: true });
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('courses', 'slug');
+  pgm.dropIndex('modules', ['course_id', 'position']);
+  pgm.dropTable('modules');
+  pgm.dropTable('courses');
+};
+
+--- End of Migration: 1695470100000_create_courses_modules.js ---
+
+--- Migration: 1695470200000_create_tasks_assignments.js ---
+File: migrations/1695470200000_create_tasks_assignments.js
+
+/* Create tasks, assignments, and assignment_history tables */
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.createTable('tasks', {
+    id: { type: 'serial', primaryKey: true },
+    title: { type: 'text', notNull: true },
+    description: { type: 'text' },
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    related_course_id: { type: 'integer', references: '"courses"', onDelete: 'set null' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('assignments', {
+    id: { type: 'serial', primaryKey: true },
+    task_id: { type: 'integer', references: '"tasks"', onDelete: 'cascade' },
+    assigned_to_user_id: { type: 'integer', references: '"users"', onDelete: 'cascade' },
+    assigned_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    assigned_group_id: { type: 'integer', references: '"teams"', onDelete: 'set null' },
+    status: { type: 'text', notNull: true, default: 'assigned' }, /* assigned, in_progress, completed, blocked */
+    due_date: { type: 'timestamp' },
+    metadata: { type: 'jsonb' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('assignment_history', {
+    id: { type: 'serial', primaryKey: true },
+    assignment_id: { type: 'integer', notNull: true, references: '"assignments"', onDelete: 'cascade' },
+    previous_status: { type: 'text' },
+    new_status: { type: 'text' },
+    changed_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    note: { type: 'text' },
+    changed_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('assignments', ['assigned_to_user_id']);
+  pgm.addIndex('assignments', ['assigned_group_id']);
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('assignments', ['assigned_group_id']);
+  pgm.dropIndex('assignments', ['assigned_to_user_id']);
+  pgm.dropTable('assignment_history');
+  pgm.dropTable('assignments');
+  pgm.dropTable('tasks');
+};
+
+--- End of Migration: 1695470200000_create_tasks_assignments.js ---
+
+--- Migration: 1695470300000_create_templates_and_dependencies.js ---
+File: migrations/1695470300000_create_templates_and_dependencies.js
+
+/* Create dependency_sets, templates, and template_dependency join table */
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.createTable('dependency_sets', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true, unique: true },
+    description: { type: 'text' },
+    script: { type: 'text' }, /* provisioning script or JSON manifest */
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('templates', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true, unique: true },
+    image: { type: 'text', notNull: true }, /* e.g., ubuntu:24.04 */
+    default_cpu: { type: 'integer', notNull: true, default: 1 },
+    default_memory_mb: { type: 'integer', notNull: true, default: 1024 },
+    default_disk_mb: { type: 'integer', notNull: true, default: 10240 },
+    network_profile: { type: 'text' },
+    init_script: { type: 'text' },
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('template_dependency', {
+    template_id: { type: 'integer', notNull: true, references: '"templates"', onDelete: 'cascade' },
+    dependency_set_id: { type: 'integer', notNull: true, references: '"dependency_sets"', onDelete: 'cascade' }
+  }, {
+    primaryKey: ['template_id', 'dependency_set_id']
+  });
+
+  pgm.addIndex('templates', 'name', { unique: true });
+  pgm.addIndex('dependency_sets', 'name', { unique: true });
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('dependency_sets', 'name');
+  pgm.dropIndex('templates', 'name');
+  pgm.dropTable('template_dependency');
+  pgm.dropTable('templates');
+  pgm.dropTable('dependency_sets');
+};
+
+--- End of Migration: 1695470300000_create_templates_and_dependencies.js ---
+
+--- Migration: 1695470400000_create_containers_and_snapshots.js ---
+File: migrations/1695470400000_create_containers_and_snapshots.js
+
+/* Create containers and snapshots metadata */
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // container_status small lookup table
+  pgm.createTable('container_statuses', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true, unique: true }
+  });
+
+  pgm.createTable('containers', {
+    id: { type: 'serial', primaryKey: true },
+    lxc_name: { type: 'text', notNull: true, unique: true },
+    owner_user_id: { type: 'integer', notNull: true, references: '"users"', onDelete: 'cascade' },
+    template_id: { type: 'integer', references: '"templates"', onDelete: 'set null' },
+    image: { type: 'text', notNull: true },
+    cpu: { type: 'integer', notNull: true, default: 1 },
+    memory_mb: { type: 'integer', notNull: true, default: 1024 },
+    disk_mb: { type: 'integer', notNull: true, default: 10240 },
+    ip_address: { type: 'inet' },
+    status_id: { type: 'integer', references: '"container_statuses"', onDelete: 'set null' },
+    metadata: { type: 'jsonb' },
+    started_at: { type: 'timestamp' },
+    stopped_at: { type: 'timestamp' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.createTable('snapshots', {
+    id: { type: 'serial', primaryKey: true },
+    container_id: { type: 'integer', notNull: true, references: '"containers"', onDelete: 'cascade' },
+    lxc_snapshot_name: { type: 'text', notNull: true },
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') },
+    notes: { type: 'text' }
+  });
+
+  pgm.addIndex('containers', ['owner_user_id']);
+  pgm.addIndex('containers', ['status_id']);
+
+  // Seed common container statuses (up/down/creating/failed/stopped)
+  pgm.sql(`
+    INSERT INTO container_statuses(name) VALUES
+    ('creating'),
+    ('running'),
+    ('stopped'),
+    ('failed'),
+    ('deleting')
+    ON CONFLICT DO NOTHING;
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.sql(`DELETE FROM container_statuses WHERE name IN ('creating','running','stopped','failed','deleting');`);
+  pgm.dropIndex('containers', ['status_id']);
+  pgm.dropIndex('containers', ['owner_user_id']);
+  pgm.dropTable('snapshots');
+  pgm.dropTable('containers');
+  pgm.dropTable('container_statuses');
+};
+
+--- End of Migration: 1695470400000_create_containers_and_snapshots.js ---
+
+--- Migration: 1695470500000_create_audit_import_and_metrics.js ---
+File: migrations/1695470500000_create_audit_import_and_metrics.js
+
+/* Create audit_logs, import_jobs, import_errors, and metrics table.
+   Also create an optional TimescaleDB hypertable if extension exists.
+*/
+exports.shorthands = undefined;
+
+exports.up = async (pgm) => {
+  // audit_logs
+  pgm.createTable('audit_logs', {
+    id: { type: 'bigserial', primaryKey: true },
+    actor_user_id: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    action: { type: 'text', notNull: true }, // e.g., 'create','update','delete','container:start'
+    target_type: { type: 'text', notNull: true }, // e.g., 'user','container','assignment'
+    target_id: { type: 'text' }, // flexible identifier (can store numeric or uuid)
+    meta: { type: 'jsonb' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('audit_logs', ['actor_user_id']);
+  pgm.addIndex('audit_logs', ['target_type', 'target_id']);
+
+  // import jobs and errors
+  pgm.createTable('import_jobs', {
+    id: { type: 'serial', primaryKey: true },
+    uploaded_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    file_name: { type: 'text', notNull: true },
+    status: { type: 'text', notNull: true, default: 'pending' }, // pending, processing, completed, failed
+    result_summary: { type: 'text' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') },
+    completed_at: { type: 'timestamp' }
+  });
+
+  pgm.createTable('import_errors', {
+    id: { type: 'serial', primaryKey: true },
+    import_job_id: { type: 'integer', notNull: true, references: '"import_jobs"', onDelete: 'cascade' },
+    row_number: { type: 'integer' },
+    error_message: { type: 'text' },
+    payload: { type: 'jsonb' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('import_errors', ['import_job_id']);
+
+  // metrics (time-series)
+  pgm.createTable('metrics', {
+    id: { type: 'bigserial', primaryKey: true },
+    metric_name: { type: 'text', notNull: true }, // e.g., 'container.cpu', 'container.memory'
+    container_id: { type: 'integer', references: '"containers"', onDelete: 'set null' },
+    team_id: { type: 'integer', references: '"teams"', onDelete: 'set null' },
+    value_num: { type: 'double precision' },
+    value_text: { type: 'text' },
+    meta: { type: 'jsonb' },
+    recorded_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  // simple index for common time-range queries
+  pgm.addIndex('metrics', ['metric_name', 'recorded_at']);
+  pgm.addIndex('metrics', ['container_id', 'recorded_at']);
+
+  // Optional: create TimescaleDB hypertable if extension exists (safe to run if extension absent)
+  // Using SQL directly because node-pg-migrate does not know about Timescale.
+  pgm.sql(`
+    DO $$
+    BEGIN
+      IF EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        -- create hypertable if not exists
+        PERFORM create_hypertable('metrics', 'recorded_at', if_not_exists => TRUE);
+      END IF;
+    EXCEPTION WHEN others THEN
+      -- ignore errors to keep migration idempotent if extension not present
+      RAISE NOTICE 'TimescaleDB hypertable creation skipped or failed: %', SQLERRM;
+    END $$;
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('metrics', ['container_id', 'recorded_at']);
+  pgm.dropIndex('metrics', ['metric_name', 'recorded_at']);
+  pgm.dropTable('metrics');
+
+  pgm.dropIndex('import_errors', ['import_job_id']);
+  pgm.dropTable('import_errors');
+  pgm.dropTable('import_jobs');
+
+  pgm.dropIndex('audit_logs', ['target_type', 'target_id']);
+  pgm.dropIndex('audit_logs', ['actor_user_id']);
+  pgm.dropTable('audit_logs');
+};
+
+--- End of Migration: 1695470500000_create_audit_import_and_metrics.js ---
+
+--- Migration: 1695470600000_create_shared_tables_and_indexes.js ---
+File: migrations/1695470600000_create_shared_tables_and_indexes.js
+
+/* Create shared tables: settings, notifications, quotas, snapshots_metadata,
+   and add additional useful indexes + constraints (uniques and checks).
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // settings/config table
+  pgm.createTable('settings', {
+    key: { type: 'text', primaryKey: true },
+    value: { type: 'text' },
+    json_value: { type: 'jsonb' },
+    description: { type: 'text' },
+    updated_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  // notifications table
+  pgm.createTable('notifications', {
+    id: { type: 'bigserial', primaryKey: true },
+    user_id: { type: 'integer', references: '"users"', onDelete: 'cascade' },
+    type: { type: 'text', notNull: true }, // e.g., assignment, container_ready
+    payload: { type: 'jsonb' },
+    read: { type: 'boolean', notNull: true, default: false },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('notifications', ['user_id', 'read']);
+
+  // quotas table
+  pgm.createTable('quotas', {
+    id: { type: 'serial', primaryKey: true },
+    team_id: { type: 'integer', references: '"teams"', onDelete: 'cascade' },
+    user_id: { type: 'integer', references: '"users"', onDelete: 'cascade' },
+    cores_limit: { type: 'integer', default: 8 },
+    memory_mb_limit: { type: 'integer', default: 8192 },
+    disk_mb_limit: { type: 'integer', default: 102400 },
+    max_concurrent_containers: { type: 'integer', default: 2 },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  // ensure either team_id or user_id is present (but not enforced via complex CHECK easily here)
+  pgm.addIndex('quotas', ['team_id']);
+  pgm.addIndex('quotas', ['user_id']);
+
+  // snapshots metadata (to complement lxc snapshot identifiers)
+  pgm.createTable('snapshots_metadata', {
+    id: { type: 'bigserial', primaryKey: true },
+    container_id: { type: 'integer', notNull: true, references: '"containers"', onDelete: 'cascade' },
+    snapshot_name: { type: 'text', notNull: true },
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') },
+    notes: { type: 'text' }
+  });
+
+  pgm.addIndex('snapshots_metadata', ['container_id']);
+  pgm.addIndex('snapshots_metadata', ['created_at']);
+
+  // Add additional constraints & checks on existing tables
+  // tasks.status / assignments.status constraint enforcement via lookup tables not enums here
+  pgm.createTable('assignment_statuses', {
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'text', notNull: true, unique: true }
+  });
+
+  pgm.sql(`
+    INSERT INTO assignment_statuses (name) VALUES
+    ('assigned'), ('in_progress'), ('completed'), ('blocked')
+    ON CONFLICT DO NOTHING;
+  `);
+
+  // add NOT NULL constraints or unique constraints where missing (safe ALTERs)
+  pgm.alterColumn('templates', 'name', { type: 'text', notNull: true });
+  pgm.alterColumn('dependency_sets', 'name', { type: 'text', notNull: true });
+  pgm.alterColumn('courses', 'title', { type: 'text', notNull: true });
+
+  // Create text search index for courses.title and courses.description using tsvector
+  pgm.sql(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS search_vector tsvector;`);
+  pgm.sql(`UPDATE courses SET search_vector = to_tsvector('english', coalesce(title,'') || ' ' || coalesce(description,''));`);
+  pgm.sql(`CREATE INDEX IF NOT EXISTS courses_search_idx ON courses USING GIN(search_vector);`);
+  // trigger to keep search_vector up to date
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION courses_tsv_trigger() RETURNS trigger AS $$
+    begin
+      new.search_vector := to_tsvector('english', coalesce(new.title,'') || ' ' || coalesce(new.description,''));
+      return new;
+    end
+    $$ LANGUAGE plpgsql;
+  `);
+  pgm.sql(`
+    DROP TRIGGER IF EXISTS tsvectorupdate ON courses;
+    CREATE TRIGGER tsvectorupdate BEFORE INSERT OR UPDATE
+    ON courses FOR EACH ROW EXECUTE PROCEDURE courses_tsv_trigger();
+  `);
+
+  // Add some helpful indexes for FK heavy lookups
+  pgm.addIndex('assignments', ['task_id']);
+  pgm.addIndex('tasks', ['created_by']);
+  pgm.addIndex('templates', ['created_by']);
+  pgm.addIndex('dependency_sets', ['created_by']);
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('dependency_sets', ['created_by']);
+  pgm.dropIndex('templates', ['created_by']);
+  pgm.dropIndex('tasks', ['created_by']);
+  pgm.dropIndex('assignments', ['task_id']);
+
+  pgm.sql(`DROP TRIGGER IF EXISTS tsvectorupdate ON courses;`);
+  pgm.sql(`DROP FUNCTION IF EXISTS courses_tsv_trigger();`);
+  pgm.sql(`DROP INDEX IF EXISTS courses_search_idx;`);
+  pgm.sql(`ALTER TABLE courses DROP COLUMN IF EXISTS search_vector;`);
+
+  pgm.alterColumn('courses', 'title', { type: 'text' }); // cannot revert notNull easily to previous state
+
+  pgm.sql(`DELETE FROM assignment_statuses WHERE name IN ('assigned','in_progress','completed','blocked');`);
+  pgm.dropTable('assignment_statuses');
+
+  pgm.dropIndex('snapshots_metadata', ['created_at']);
+  pgm.dropIndex('snapshots_metadata', ['container_id']);
+  pgm.dropTable('snapshots_metadata');
+
+  pgm.dropIndex('quotas', ['user_id']);
+  pgm.dropIndex('quotas', ['team_id']);
+  pgm.dropTable('quotas');
+
+  pgm.dropIndex('notifications', ['user_id', 'read']);
+  pgm.dropTable('notifications');
+
+  pgm.dropTable('settings');
+
+  // Drop shared indexes and constraints are handled above
+};
+
+--- End of Migration: 1695470600000_create_shared_tables_and_indexes.js ---
+
+--- Migration: 1695470700000_create_audit_triggers.js ---
+File: migrations/1695470700000_create_audit_triggers.js
+
+/* Create a generic audit trigger function and attach to critical tables */
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // audit trigger function
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION app_audit_trigger() RETURNS trigger AS $$
+    DECLARE
+      v_actor integer := NULL;
+    BEGIN
+      -- if actor is passed via current_setting, capture it
+      BEGIN
+        v_actor := current_setting('app.current_user_id')::integer;
+      EXCEPTION WHEN others THEN
+        v_actor := NULL;
+      END;
+
+      INSERT INTO audit_logs(actor_user_id, action, target_type, target_id, meta, created_at)
+      VALUES (
+        v_actor,
+        TG_OP, -- 'INSERT','UPDATE','DELETE'
+        TG_TABLE_NAME,
+        COALESCE( NEW.id::text, OLD.id::text ),
+        to_jsonb(COALESCE(ROW(OLD.*)::text, ROW(NEW.*)::text)) || jsonb_build_object('changed_columns', to_jsonb(array(SELECT column_name FROM information_schema.columns WHERE table_name = TG_TABLE_NAME))),
+        now()
+      );
+
+      RETURN NULL; -- audit only; do not modify the row
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+  `);
+
+  // Attach trigger to tables: users, containers, assignments, courses, templates, tasks
+  const tables = ['users','containers','assignments','courses','templates','tasks'];
+  tables.forEach(t => {
+    pgm.sql(`
+      DROP TRIGGER IF EXISTS trg_audit_${t} ON ${t};
+      CREATE TRIGGER trg_audit_${t}
+      AFTER INSERT OR UPDATE OR DELETE ON ${t}
+      FOR EACH ROW EXECUTE PROCEDURE app_audit_trigger();
+    `);
+  });
+};
+
+exports.down = (pgm) => {
+  const tables = ['users','containers','assignments','courses','templates','tasks'];
+  tables.forEach(t => {
+    pgm.sql(`DROP TRIGGER IF EXISTS trg_audit_${t} ON ${t};`);
+  });
+
+  pgm.sql(`DROP FUNCTION IF EXISTS app_audit_trigger();`);
+};
+
+--- End of Migration: 1695470700000_create_audit_triggers.js ---
+
+--- Migration: 1695470800000_add_constraints_and_checks.js ---
+File: migrations/1695470800000_add_constraints_and_checks.js
+
+/* Fixed migration: avoid subquery in DEFAULT by resolving status_id in JS and setting literal default. */
+exports.shorthands = undefined;
+
+exports.up = async (pgm) => {
+  // Add check constraints and required NOT NULLs
+  pgm.addConstraint('users', 'users_status_check', {
+    check: "status IN ('active', 'disabled', 'suspended')"
+  });
+
+  pgm.addConstraint('assignments', 'assignments_status_check', {
+    check: "status IN ('assigned', 'in_progress', 'completed', 'blocked')"
+  });
+
+  pgm.alterColumn('templates', 'image', { type: 'text', notNull: true });
+  pgm.alterColumn('courses', 'slug', { type: 'text', notNull: true });
+  pgm.alterColumn('containers', 'lxc_name', { type: 'text', notNull: true });
+  pgm.alterColumn('audit_logs', 'action', { type: 'text', notNull: true });
+
+  // Resolve the id for 'creating' and set a literal default
+  const res = await pgm.db.query("SELECT id FROM container_statuses WHERE name = 'creating' LIMIT 1");
+  if (res && res.rows && res.rows.length) {
+    const creatingId = res.rows[0].id;
+    await pgm.sql(`ALTER TABLE containers ALTER COLUMN status_id SET DEFAULT ${creatingId};`);
+  } else {
+    // no status found - leave default NULL (or optionally create the status)
+    // If you want to create it if missing:
+    await pgm.sql(`
+      INSERT INTO container_statuses(name)
+      VALUES ('creating')
+      ON CONFLICT DO NOTHING;
+    `);
+    const r2 = await pgm.db.query("SELECT id FROM container_statuses WHERE name = 'creating' LIMIT 1");
+    if (r2 && r2.rows && r2.rows.length) {
+      const creatingId2 = r2.rows[0].id;
+      await pgm.sql(`ALTER TABLE containers ALTER COLUMN status_id SET DEFAULT ${creatingId2};`);
+    }
+  }
+
+  // add provisioning_pref jsonb column
+  pgm.addColumn('users', {
+    provisioning_pref: { type: 'jsonb', notNull: false, default: null }
+  });
+};
+
+exports.down = async (pgm) => {
+  pgm.dropColumn('users', 'provisioning_pref');
+  await pgm.sql(`ALTER TABLE containers ALTER COLUMN status_id DROP DEFAULT;`);
+  pgm.alterColumn('audit_logs', 'action', { type: 'text' });
+  pgm.alterColumn('containers', 'lxc_name', { type: 'text' });
+  pgm.alterColumn('courses', 'slug', { type: 'text' });
+  pgm.alterColumn('templates', 'image', { type: 'text' });
+  pgm.dropConstraint('assignments', 'assignments_status_check');
+  pgm.dropConstraint('users', 'users_status_check');
+};
+
+--- End of Migration: 1695470800000_add_constraints_and_checks.js ---
+
+--- Migration: 1695470900000_adjust_fk_ondelete_behaviour.js ---
+File: migrations/1695470900000_adjust_fk_ondelete_behaviour.js
+
+/* Adjust FK on-delete behavior for a few sensitive relations to avoid accidental cascading deletes.
+   For example: containers.owner_user_id should be SET NULL on user deletion (so container metadata remains).
+   Also make sure templates/dependency_sets maintain safe behavior.
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // Helper function (raw SQL) to drop and recreate FK with different ON DELETE action.
+  // 1) containers.owner_user_id  -> SET NULL (previously cascade)
+  pgm.sql(`
+    ALTER TABLE containers
+    DROP CONSTRAINT IF EXISTS containers_owner_user_id_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE containers
+    ADD CONSTRAINT containers_owner_user_id_fkey FOREIGN KEY (owner_user_id)
+    REFERENCES users(id) ON DELETE SET NULL;
+  `);
+
+  // 2) snapshots.container_id -> cascade remains OK (keep)
+  // 3) templates.created_by -> SET NULL (already set, but ensure constraint exists)
+  pgm.sql(`
+    ALTER TABLE templates
+    DROP CONSTRAINT IF EXISTS templates_created_by_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE templates
+    ADD CONSTRAINT templates_created_by_fkey FOREIGN KEY (created_by)
+    REFERENCES users(id) ON DELETE SET NULL;
+  `);
+
+  // 4) dependency_sets.created_by -> SET NULL
+  pgm.sql(`
+    ALTER TABLE dependency_sets
+    DROP CONSTRAINT IF EXISTS dependency_sets_created_by_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE dependency_sets
+    ADD CONSTRAINT dependency_sets_created_by_fkey FOREIGN KEY (created_by)
+    REFERENCES users(id) ON DELETE SET NULL;
+  `);
+
+  // 5) roles remain restrict (do not allow delete if referenced)
+  // 6) assignments.assigned_to_user_id -> SET NULL on delete (preserve assignment record)
+  pgm.sql(`
+    ALTER TABLE assignments
+    DROP CONSTRAINT IF EXISTS assignments_assigned_to_user_id_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE assignments
+    ADD CONSTRAINT assignments_assigned_to_user_id_fkey FOREIGN KEY (assigned_to_user_id)
+    REFERENCES users(id) ON DELETE SET NULL;
+  `);
+};
+
+exports.down = (pgm) => {
+  // revert some to cascade where previously cascade was present (best effort)
+  pgm.sql(`
+    ALTER TABLE containers
+    DROP CONSTRAINT IF EXISTS containers_owner_user_id_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE containers
+    ADD CONSTRAINT containers_owner_user_id_fkey FOREIGN KEY (owner_user_id)
+    REFERENCES users(id) ON DELETE CASCADE;
+  `);
+
+  pgm.sql(`
+    ALTER TABLE templates
+    DROP CONSTRAINT IF EXISTS templates_created_by_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE templates
+    ADD CONSTRAINT templates_created_by_fkey FOREIGN KEY (created_by)
+    REFERENCES users(id) ON DELETE CASCADE;
+  `);
+
+  pgm.sql(`
+    ALTER TABLE dependency_sets
+    DROP CONSTRAINT IF EXISTS dependency_sets_created_by_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE dependency_sets
+    ADD CONSTRAINT dependency_sets_created_by_fkey FOREIGN KEY (created_by)
+    REFERENCES users(id) ON DELETE CASCADE;
+  `);
+
+  pgm.sql(`
+    ALTER TABLE assignments
+    DROP CONSTRAINT IF EXISTS assignments_assigned_to_user_id_fkey;
+  `);
+  pgm.sql(`
+    ALTER TABLE assignments
+    ADD CONSTRAINT assignments_assigned_to_user_id_fkey FOREIGN KEY (assigned_to_user_id)
+    REFERENCES users(id) ON DELETE CASCADE;
+  `);
+};
+
+--- End of Migration: 1695470900000_adjust_fk_ondelete_behaviour.js ---
+
+--- Migration: 1695471000000_enforce_assignment_status_fk_like.js ---
+File: migrations/1695471000000_enforce_assignment_status_fk_like.js
+
+/* Add a convenience FK-like relationship: store assignment_status_id, keep status text for readability.
+   This is non-destructive: we add assignment_status_id, populate it, and keep text column in place.
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // add new column assignment_status_id
+  pgm.addColumn('assignments', {
+    assignment_status_id: { type: 'integer', references: '"assignment_statuses"', onDelete: 'set null' }
+  });
+
+  // populate assignment_status_id from assignments.status text
+  pgm.sql(`
+    UPDATE assignments a
+    SET assignment_status_id = s.id
+    FROM assignment_statuses s
+    WHERE a.status = s.name;
+  `);
+
+  // add index for quick lookup
+  pgm.addIndex('assignments', 'assignment_status_id');
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('assignments', 'assignment_status_id');
+  pgm.dropColumn('assignments', 'assignment_status_id');
+};
+
+--- End of Migration: 1695471000000_enforce_assignment_status_fk_like.js ---
+
+--- Migration: 1695471100000_sessions_sshkeys_usage_and_retention.js ---
+File: migrations/1695471100000_sessions_sshkeys_usage_and_retention.js
+
+/* Sessions, SSH keys, usage counters, and retention helpers (idempotent).
+   Uses CREATE INDEX IF NOT EXISTS to avoid failing when index already exists.
+*/
+exports.shorthands = undefined;
+
+exports.up = async (pgm) => {
+  // sessions table
+  pgm.createTable('sessions', {
+    id: { type: 'bigserial', primaryKey: true },
+    user_id: { type: 'integer', references: '"users"', onDelete: 'cascade' },
+    provider: { type: 'text', notNull: true, default: 'azure_ad' },
+    provider_account_id: { type: 'text' },
+    token_expires_at: { type: 'timestamp' },
+    refresh_token_hash: { type: 'text' },
+    meta: { type: 'jsonb' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') },
+    last_active_at: { type: 'timestamp' }
+  });
+
+  // ssh_keys table
+  pgm.createTable('ssh_keys', {
+    id: { type: 'bigserial', primaryKey: true },
+    user_id: { type: 'integer', references: '"users"', onDelete: 'cascade' },
+    key_type: { type: 'text', notNull: true },
+    public_key: { type: 'text', notNull: true },
+    label: { type: 'text' },
+    ephemeral: { type: 'boolean', notNull: true, default: false },
+    expires_at: { type: 'timestamp' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  // usage_counters table
+  pgm.createTable('usage_counters', {
+    id: { type: 'serial', primaryKey: true },
+    team_id: { type: 'integer', references: '"teams"', onDelete: 'cascade' },
+    user_id: { type: 'integer', references: '"users"', onDelete: 'cascade' },
+    period_start: { type: 'date', notNull: true },
+    cores_used: { type: 'integer', notNull: true, default: 0 },
+    memory_mb_used: { type: 'bigint', notNull: true, default: 0 },
+    storage_mb_used: { type: 'bigint', notNull: true, default: 0 },
+    concurrent_containers: { type: 'integer', notNull: true, default: 0 },
+    updated_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  /* Use guarded (IF NOT EXISTS) index creation to avoid collision with prior runs */
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS sessions_user_id_index ON sessions (user_id);`);
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS sessions_provider_account_id_index ON sessions (provider_account_id);`);
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS ssh_keys_user_id_index ON ssh_keys (user_id);`);
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS ssh_keys_ephemeral_index ON ssh_keys (ephemeral);`);
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS usage_counters_team_id_period_start_index ON usage_counters (team_id, period_start);`);
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS usage_counters_user_id_period_start_index ON usage_counters (user_id, period_start);`);
+
+  /* Retention helpers: create archive table and functions (idempotent) */
+  await pgm.sql(`
+    CREATE TABLE IF NOT EXISTS audit_logs_archive (LIKE audit_logs INCLUDING ALL) INHERITS (audit_logs);
+  `);
+
+  await pgm.sql(`
+    CREATE OR REPLACE FUNCTION move_old_audit_logs(p_days integer) RETURNS void AS $$
+    BEGIN
+      INSERT INTO audit_logs_archive SELECT * FROM audit_logs WHERE created_at < now() - (p_days || ' days')::interval;
+      DELETE FROM audit_logs WHERE created_at < now() - (p_days || ' days')::interval;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  await pgm.sql(`
+    CREATE OR REPLACE FUNCTION purge_old_metrics(p_days integer) RETURNS void AS $$
+    BEGIN
+      DELETE FROM metrics WHERE recorded_at < now() - (p_days || ' days')::interval;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  /* Ensure audit_logs/metrics indexes exist (guarded) */
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS audit_logs_created_at_index ON audit_logs (created_at);`);
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS audit_logs_actor_user_id_index ON audit_logs (actor_user_id);`);
+  await pgm.sql(`CREATE INDEX IF NOT EXISTS metrics_recorded_at_index ON metrics (recorded_at);`);
+};
+
+exports.down = async (pgm) => {
+  await pgm.sql(`DROP INDEX IF EXISTS metrics_recorded_at_index;`);
+  await pgm.sql(`DROP INDEX IF EXISTS audit_logs_actor_user_id_index;`);
+  await pgm.sql(`DROP INDEX IF EXISTS audit_logs_created_at_index;`);
+  await pgm.sql(`DROP FUNCTION IF EXISTS purge_old_metrics(integer);`);
+  await pgm.sql(`DROP FUNCTION IF EXISTS move_old_audit_logs(integer);`);
+  await pgm.sql(`DROP TABLE IF EXISTS audit_logs_archive;`);
+
+  pgm.dropTable('usage_counters', { ifExists: true });
+  pgm.dropTable('ssh_keys', { ifExists: true });
+  pgm.dropTable('sessions', { ifExists: true });
+};
+
+--- End of Migration: 1695471100000_sessions_sshkeys_usage_and_retention.js ---
+
+--- Migration: 1695471200000_quota_functions.js ---
+File: migrations/1695471200000_quota_functions.js
+
+/* Quota enforcement helpers:
+   - function: check_quota_for_user(user_id, required_cores, required_memory_mb, required_disk_mb)
+   - function updates/reads usage_counters and returns boolean (allowed or not)
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.sql(`
+  CREATE OR REPLACE FUNCTION check_and_reserve_quota(
+    p_user_id integer,
+    p_team_id integer,
+    p_cores integer,
+    p_memory_mb bigint,
+    p_disk_mb bigint
+  ) RETURNS boolean AS $$
+  DECLARE
+    v_quota RECORD;
+    v_usage RECORD;
+  BEGIN
+    -- prefer user-specific quota, fallback to team quota
+    SELECT * INTO v_quota FROM quotas WHERE user_id = p_user_id LIMIT 1;
+    IF NOT FOUND THEN
+      SELECT * INTO v_quota FROM quotas WHERE team_id = p_team_id LIMIT 1;
+    END IF;
+
+    IF NOT FOUND THEN
+      -- no quota record -> allow (or you may choose to deny)
+      RETURN TRUE;
+    END IF;
+
+    -- get today's usage
+    SELECT * INTO v_usage FROM usage_counters WHERE user_id = p_user_id AND period_start = CURRENT_DATE LIMIT 1;
+    IF NOT FOUND THEN
+      -- no usage record yet, create it
+      INSERT INTO usage_counters(user_id, team_id, period_start, cores_used, memory_mb_used, storage_mb_used, concurrent_containers)
+      VALUES (p_user_id, p_team_id, CURRENT_DATE, 0, 0, 0, 0);
+      SELECT * INTO v_usage FROM usage_counters WHERE user_id = p_user_id AND period_start = CURRENT_DATE LIMIT 1;
+    END IF;
+
+    -- Check limits
+    IF v_quota.cores_limit IS NOT NULL AND (v_usage.cores_used + p_cores) > v_quota.cores_limit THEN
+      RETURN FALSE;
+    END IF;
+
+    IF v_quota.memory_mb_limit IS NOT NULL AND (v_usage.memory_mb_used + p_memory_mb) > v_quota.memory_mb_limit THEN
+      RETURN FALSE;
+    END IF;
+
+    IF v_quota.disk_mb_limit IS NOT NULL AND (v_usage.storage_mb_used + p_disk_mb) > v_quota.disk_mb_limit THEN
+      RETURN FALSE;
+    END IF;
+
+    -- Reserve: update usage counters (this is simplistic and meant to be used inside transactional ops)
+    UPDATE usage_counters
+    SET cores_used = cores_used + p_cores,
+        memory_mb_used = memory_mb_used + p_memory_mb,
+        storage_mb_used = storage_mb_used + p_disk_mb,
+        updated_at = now()
+    WHERE id = v_usage.id;
+
+    RETURN TRUE;
+  END;
+  $$ LANGUAGE plpgsql;
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.sql(`DROP FUNCTION IF EXISTS check_and_reserve_quota(integer, integer, integer, bigint, bigint);`);
+};
+
+--- End of Migration: 1695471200000_quota_functions.js ---
+
+--- Migration: 1695471300000_snapshot_helpers.js ---
+File: migrations/1695471300000_snapshot_helpers.js
+
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // Ensure snapshots table exists (we created snapshots earlier). Add helpful index and function.
+  pgm.addIndex('snapshots', ['container_id', 'created_at']);
+
+  // Create function to record snapshot metadata after LXC snapshot creation (back-end will call this)
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION record_snapshot(p_container_id integer, p_snapshot_name text, p_created_by integer, p_notes text) RETURNS void AS $$
+    BEGIN
+      INSERT INTO snapshots(container_id, lxc_snapshot_name, created_by, created_at, notes)
+      VALUES (p_container_id, p_snapshot_name, p_created_by, now(), p_notes);
+      INSERT INTO snapshots_metadata(container_id, snapshot_name, created_by, created_at, notes)
+      VALUES (p_container_id, p_snapshot_name, p_created_by, now(), p_notes);
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.dropIndex('snapshots', ['container_id', 'created_at']);
+  pgm.sql(`DROP FUNCTION IF EXISTS record_snapshot(integer, text, integer, text);`);
+};
+
+--- End of Migration: 1695471300000_snapshot_helpers.js ---
+
+--- Migration: 1695471400000_dbroles_rls_and_triggers.js ---
+File: migrations/1695471400000_dbroles_rls_and_triggers.js
+
+/* Create DB roles (app_role, readonly_role), enable RLS stubs, add advisory lock helpers,
+   and core triggers: assignment_history + notification on assignment status change.
+*/
+exports.shorthands = undefined;
+
+exports.up = async (pgm) => {
+  // Create DB roles (these are db-level roles - run as superuser during setup)
+  // NOTE: In dev this runs as SQL; in some environments you may need to create roles manually.
+  pgm.sql(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_role') THEN
+        CREATE ROLE app_role NOINHERIT LOGIN;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'readonly_role') THEN
+        CREATE ROLE readonly_role NOINHERIT;
+      END IF;
+    END$$;
+  `);
+
+  // Grant minimal privileges example (grant on public schema objects later; kept minimal here)
+  // Add helper functions: acquire_advisory_lock, release_advisory_lock
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION acquire_advisory_lock(p_key bigint, p_timeout integer DEFAULT 10) RETURNS boolean AS $$
+    DECLARE
+      v_got boolean;
+    BEGIN
+      SELECT pg_try_advisory_lock(p_key) INTO v_got;
+      IF v_got THEN RETURN TRUE; END IF;
+      -- simple retry loop for p_timeout seconds
+      FOR i IN 1..p_timeout LOOP
+        PERFORM pg_sleep(1);
+        SELECT pg_try_advisory_lock(p_key) INTO v_got;
+        IF v_got THEN RETURN TRUE; END IF;
+      END LOOP;
+      RETURN FALSE;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION release_advisory_lock(p_key bigint) RETURNS boolean AS $$
+    BEGIN
+      RETURN pg_advisory_unlock(p_key);
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  // assignment_history trigger function (maintain history on status change)
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION assignment_status_history() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP = 'UPDATE' THEN
+        IF (OLD.status IS DISTINCT FROM NEW.status) THEN
+          INSERT INTO assignment_history(assignment_id, previous_status, new_status, changed_by, note, changed_at)
+          VALUES (OLD.id, OLD.status, NEW.status, current_setting('app.current_user_id', true)::integer, NULL, now());
+        END IF;
+      ELSIF TG_OP = 'INSERT' THEN
+        INSERT INTO assignment_history(assignment_id, previous_status, new_status, changed_by, note, changed_at)
+        VALUES (NEW.id, NULL, NEW.status, current_setting('app.current_user_id', true)::integer, 'created', now());
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+  `);
+
+  // attach trigger
+  pgm.sql(`
+    DROP TRIGGER IF EXISTS trg_assignment_history ON assignments;
+    CREATE TRIGGER trg_assignment_history
+      AFTER INSERT OR UPDATE ON assignments
+      FOR EACH ROW EXECUTE PROCEDURE assignment_status_history();
+  `);
+
+  // notification trigger: on assignment INSERT or status change produce notification for assigned user
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION assignment_notify_trigger() RETURNS trigger AS $$
+    DECLARE
+      v_user integer;
+      v_payload jsonb;
+    BEGIN
+      IF TG_OP = 'INSERT' THEN
+        v_user := NEW.assigned_to_user_id;
+        v_payload := jsonb_build_object('type','assignment_assigned','assignment_id', NEW.id);
+      ELSIF TG_OP = 'UPDATE' AND (OLD.status IS DISTINCT FROM NEW.status) THEN
+        v_user := NEW.assigned_to_user_id;
+        v_payload := jsonb_build_object('type','assignment_status_changed','assignment_id', NEW.id, 'from', OLD.status, 'to', NEW.status);
+      ELSE
+        RETURN NEW;
+      END IF;
+
+      IF v_user IS NOT NULL THEN
+        INSERT INTO notifications(user_id, type, payload, read, created_at)
+        VALUES (v_user, (v_payload->>'type')::text, v_payload, false, now());
+      END IF;
+
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+  `);
+
+  pgm.sql(`
+    DROP TRIGGER IF EXISTS trg_assignment_notify ON assignments;
+    CREATE TRIGGER trg_assignment_notify
+      AFTER INSERT OR UPDATE ON assignments
+      FOR EACH ROW EXECUTE PROCEDURE assignment_notify_trigger();
+  `);
+
+  // RLS stub: enable for courses and containers (disabled policies to be added by app later)
+  pgm.sql(`ALTER TABLE courses ENABLE ROW LEVEL SECURITY;`);
+  pgm.sql(`ALTER TABLE containers ENABLE ROW LEVEL SECURITY;`);
+};
+
+exports.down = async (pgm) => {
+  pgm.sql(`DROP TRIGGER IF EXISTS trg_assignment_notify ON assignments;`);
+  pgm.sql(`DROP FUNCTION IF EXISTS assignment_notify_trigger();`);
+  pgm.sql(`DROP TRIGGER IF EXISTS trg_assignment_history ON assignments;`);
+  pgm.sql(`DROP FUNCTION IF EXISTS assignment_status_history();`);
+  pgm.sql(`DROP FUNCTION IF EXISTS acquire_advisory_lock(bigint, integer);`);
+  pgm.sql(`DROP FUNCTION IF EXISTS release_advisory_lock(bigint);`);
+  pgm.sql(`ALTER TABLE courses DISABLE ROW LEVEL SECURITY;`);
+  pgm.sql(`ALTER TABLE containers DISABLE ROW LEVEL SECURITY;`);
+  // Note: do not DROP DB roles on down to avoid accidental removal in dev environments
+};
+
+--- End of Migration: 1695471400000_dbroles_rls_and_triggers.js ---
+
+--- Migration: 1695471500000_transactional_container_provisioning.js ---
+File: migrations/1695471500000_transactional_container_provisioning.js
+
+/* Transaction-safe example function to provision a container row while reserving quota and taking an advisory lock.
+   The actual LXC creation is done by backend; this function reserves DB rows and returns a container row id.
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.sql(`
+  CREATE OR REPLACE FUNCTION reserve_container_row(
+    p_user_id integer,
+    p_team_id integer,
+    p_template_id integer,
+    p_image text,
+    p_cpu integer,
+    p_memory_mb integer,
+    p_disk_mb integer
+  ) RETURNS integer AS $$
+  DECLARE
+    v_ok boolean;
+    v_lock_key bigint := (p_user_id::bigint << 32) # coalesce(p_team_id,0)::bigint;
+    v_container_id integer;
+  BEGIN
+    -- acquire advisory lock
+    IF NOT acquire_advisory_lock(v_lock_key, 5) THEN
+      RAISE EXCEPTION 'Could not acquire advisory lock for user %', p_user_id;
+    END IF;
+
+    BEGIN
+      -- check and reserve quota
+      v_ok := check_and_reserve_quota(p_user_id, p_team_id, p_cpu, p_memory_mb, p_disk_mb);
+      IF NOT v_ok THEN
+        PERFORM release_advisory_lock(v_lock_key);
+        RETURN NULL;
+      END IF;
+
+      -- create container row with status 'creating' (status_id default should apply)
+      INSERT INTO containers (lxc_name, owner_user_id, template_id, image, cpu, memory_mb, disk_mb, metadata, created_at)
+      VALUES (
+        concat('plab-', (nextval('containers_id_seq'))::text),
+        p_user_id, p_template_id, p_image, p_cpu, p_memory_mb, p_disk_mb, '{}'::jsonb, now()
+      ) RETURNING id INTO v_container_id;
+
+      -- return the container id to caller
+      RETURN v_container_id;
+    EXCEPTION WHEN OTHERS THEN
+      PERFORM release_advisory_lock(v_lock_key);
+      RAISE;
+    END;
+
+    -- release lock (caller may still hold/ask backend to keep until LXC creation completes)
+    PERFORM release_advisory_lock(v_lock_key);
+
+    RETURN v_container_id;
+  END;
+  $$ LANGUAGE plpgsql;
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.sql(`DROP FUNCTION IF EXISTS reserve_container_row(integer, integer, integer, text, integer, integer, integer);`);
+};
+
+--- End of Migration: 1695471500000_transactional_container_provisioning.js ---
+
+--- Migration: 1695471600000_web_ssh_sessions.js ---
+File: migrations/1695471600000_web_ssh_sessions.js
+
+/* 1695471600000_web_ssh_sessions.js
+   Web-based SSH session tokens for containers
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // table
+  pgm.createTable('web_ssh_sessions', {
+    id: { type: 'bigserial', primaryKey: true },
+    user_id: { type: 'integer', references: 'users', onDelete: 'CASCADE' },
+    container_id: { type: 'integer', references: 'containers', onDelete: 'CASCADE' },
+    session_token: { type: 'text', notNull: true },
+    token_hash: { type: 'text' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('CURRENT_TIMESTAMP') },
+    expires_at: { type: 'timestamp' },
+    last_active_at: { type: 'timestamp' },
+    client_ip: { type: 'text' },
+    user_agent: { type: 'text' },
+    status: { type: 'text', notNull: true, default: 'active' }
+  });
+
+  // indexes (if not exists)
+  pgm.sql("CREATE INDEX IF NOT EXISTS web_ssh_sessions_user_id_index ON web_ssh_sessions (user_id);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS web_ssh_sessions_container_id_index ON web_ssh_sessions (container_id);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS web_ssh_sessions_session_token_index ON web_ssh_sessions (session_token);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS web_ssh_sessions_expires_at_index ON web_ssh_sessions (expires_at);");
+};
+
+exports.down = (pgm) => {
+  pgm.dropTable('web_ssh_sessions', { ifExists: true, cascade: true });
+};
+
+--- End of Migration: 1695471600000_web_ssh_sessions.js ---
+
+--- Migration: 1695471700000_container_lifecycle.js ---
+File: migrations/1695471700000_container_lifecycle.js
+
+/* 1695471700000_container_lifecycle.js
+   Container lifecycle helper: function to validate status transitions and trigger
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // Add container lifecycle audit table (idempotent via CREATE TABLE IF NOT EXISTS)
+  pgm.sql(`
+    CREATE TABLE IF NOT EXISTS container_lifecycle (
+      id bigserial PRIMARY KEY,
+      container_id integer REFERENCES containers(id) ON DELETE CASCADE,
+      old_status_id integer,
+      new_status_id integer,
+      reason text,
+      changed_by integer REFERENCES users(id) ON DELETE SET NULL,
+      changed_at timestamp DEFAULT current_timestamp NOT NULL
+    );
+  `);
+
+  // create function enforce_container_status_transition(new_status_id integer, old_status_id integer) used by trigger
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION enforce_container_status_transition() RETURNS trigger AS $$
+    DECLARE
+      v_old integer := COALESCE(OLD.status_id, NULL);
+      v_new integer := COALESCE(NEW.status_id, NULL);
+      v_valid boolean := TRUE;
+      -- set of allowed transitions (example). You can extend this logic.
+    BEGIN
+      IF v_old IS NULL THEN
+        v_valid := TRUE; -- initial insert always allowed
+      ELSE
+        -- allow same status
+        IF v_old = v_new THEN
+          v_valid := TRUE;
+        ELSE
+          -- Simple policy example:
+          -- creating -> running, creating -> failed, running -> stopped, stopped -> running, any -> deleting
+          PERFORM CASE
+            WHEN (v_old = (SELECT id FROM container_statuses WHERE name='creating' LIMIT 1) AND v_new IN ((SELECT id FROM container_statuses WHERE name='running' LIMIT 1), (SELECT id FROM container_statuses WHERE name='failed' LIMIT 1))) THEN NULL
+            WHEN (v_old = (SELECT id FROM container_statuses WHERE name='running' LIMIT 1) AND v_new = (SELECT id FROM container_statuses WHERE name='stopped' LIMIT 1)) THEN NULL
+            WHEN (v_old = (SELECT id FROM container_statuses WHERE name='stopped' LIMIT 1) AND v_new = (SELECT id FROM container_statuses WHERE name='running' LIMIT 1)) THEN NULL
+            WHEN (v_new = (SELECT id FROM container_statuses WHERE name='deleting' LIMIT 1)) THEN NULL
+            ELSE RAISE EXCEPTION 'Invalid container status transition from % to %', v_old, v_new
+          END CASE;
+        END IF;
+      END IF;
+
+      -- audit the change
+      INSERT INTO container_lifecycle(container_id, old_status_id, new_status_id, changed_by, changed_at)
+      VALUES (COALESCE(NEW.id, OLD.id), v_old, v_new, current_setting('app.current_user_id', true)::integer, now());
+
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+  `);
+
+  // Create trigger on containers table - AFTER UPDATE OF status_id
+  pgm.sql(`
+    DROP TRIGGER IF EXISTS trg_container_status_transition ON containers;
+    CREATE TRIGGER trg_container_status_transition
+      AFTER UPDATE ON containers
+      FOR EACH ROW
+      WHEN (OLD.status_id IS DISTINCT FROM NEW.status_id)
+      EXECUTE PROCEDURE enforce_container_status_transition();
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.sql(`DROP TRIGGER IF EXISTS trg_container_status_transition ON containers;`);
+  pgm.sql(`DROP FUNCTION IF EXISTS enforce_container_status_transition();`);
+  pgm.dropTable('container_lifecycle', { ifExists: true, cascade: true });
+};
+
+--- End of Migration: 1695471700000_container_lifecycle.js ---
+
+--- Migration: 1695471800000_search_indexes.js ---
+File: migrations/1695471800000_search_indexes.js
+
+/* 1695471800000_search_indexes.js
+   Adds trigram / tsvector indexes for search performance
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // ensure pg_trgm extension
+  pgm.sql("CREATE EXTENSION IF NOT EXISTS pg_trgm;");
+
+  // users: trigram on email and name
+  pgm.sql("CREATE INDEX IF NOT EXISTS users_email_trgm_idx ON users USING gin (email gin_trgm_ops);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS users_name_trgm_idx ON users USING gin (name gin_trgm_ops);");
+
+  // courses: full text search vector already created by earlier migrations, ensure index exists
+  pgm.sql("CREATE INDEX IF NOT EXISTS courses_search_idx ON courses USING gin(search_vector);");
+};
+
+exports.down = (pgm) => {
+  pgm.sql("DROP INDEX IF EXISTS users_email_trgm_idx;");
+  pgm.sql("DROP INDEX IF EXISTS users_name_trgm_idx;");
+  pgm.sql("DROP INDEX IF EXISTS courses_search_idx;");
+};
+
+--- End of Migration: 1695471800000_search_indexes.js ---
+
+--- Migration: 1695471900000_monitoring_views.js ---
+File: migrations/1695471900000_monitoring_views.js
+
+/* 1695471900000_monitoring_views.js
+   Materialized views for monitoring and a refresh function
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // active containers per user
+  pgm.sql(`
+    CREATE MATERIALIZED VIEW IF NOT EXISTS mv_active_containers_per_user AS
+    SELECT u.id AS user_id, u.email, COUNT(c.*) AS active_containers
+    FROM users u
+    LEFT JOIN containers c ON c.owner_user_id = u.id AND c.status_id = (SELECT id FROM container_statuses WHERE name='running' LIMIT 1)
+    GROUP BY u.id, u.email;
+  `);
+
+  // containers by status
+  pgm.sql(`
+    CREATE MATERIALIZED VIEW IF NOT EXISTS mv_containers_by_status AS
+    SELECT cs.name AS status_name, COUNT(c.*) AS cnt
+    FROM container_statuses cs
+    LEFT JOIN containers c ON c.status_id = cs.id
+    GROUP BY cs.name;
+  `);
+
+  // refresh function
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION refresh_monitoring_materialized_views() RETURNS void AS $$
+    BEGIN
+      REFRESH MATERIALIZED VIEW CONCURRENTLY mv_active_containers_per_user;
+      REFRESH MATERIALIZED VIEW CONCURRENTLY mv_containers_by_status;
+    EXCEPTION WHEN unique_violation THEN
+      -- fallback to non-concurrent if concurrent refresh not possible
+      REFRESH MATERIALIZED VIEW mv_active_containers_per_user;
+      REFRESH MATERIALIZED VIEW mv_containers_by_status;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  // create helper index on mv_active_containers_per_user for query speed (no-op if exists)
+  pgm.sql("CREATE INDEX IF NOT EXISTS mv_active_containers_per_user_user_id_idx ON mv_active_containers_per_user (user_id);");
+};
+
+exports.down = (pgm) => {
+  pgm.sql("DROP FUNCTION IF EXISTS refresh_monitoring_materialized_views();");
+  pgm.sql("DROP MATERIALIZED VIEW IF EXISTS mv_active_containers_per_user;");
+  pgm.sql("DROP MATERIALIZED VIEW IF EXISTS mv_containers_by_status;");
+  pgm.sql("DROP INDEX IF EXISTS mv_active_containers_per_user_user_id_idx;");
+};
+
+--- End of Migration: 1695471900000_monitoring_views.js ---
+
+--- Migration: 1695472000000_import_job_improvements.js ---
+File: migrations/1695472000000_import_job_improvements.js
+
+/* 1695472000000_import_job_improvements.js
+   Adds optional columns and indexes for import jobs
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.sql(`
+    ALTER TABLE import_jobs
+      ADD COLUMN IF NOT EXISTS storage_path text,
+      ADD COLUMN IF NOT EXISTS file_size_bytes bigint,
+      ADD COLUMN IF NOT EXISTS started_at timestamp,
+      ADD COLUMN IF NOT EXISTS failed_at timestamp;
+  `);
+
+  pgm.sql("CREATE INDEX IF NOT EXISTS import_jobs_status_index ON import_jobs (status);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS import_jobs_uploaded_by_index ON import_jobs (uploaded_by);");
+};
+
+exports.down = (pgm) => {
+  pgm.sql("DROP INDEX IF EXISTS import_jobs_status_index;");
+  pgm.sql("DROP INDEX IF EXISTS import_jobs_uploaded_by_index;");
+  // do not drop columns in down to avoid possible data loss; if you must:
+  // pgm.sql("ALTER TABLE import_jobs DROP COLUMN IF EXISTS storage_path;");
+};
+
+--- End of Migration: 1695472000000_import_job_improvements.js ---
+
+--- Migration: 1695472100000_template_versioning.js ---
+File: migrations/1695472100000_template_versioning.js
+
+/* 1695472100000_template_versioning.js
+   Adds templates_versions table to record versioned templates and helper function to promote version to current.
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.createTable('template_versions', {
+    id: { type: 'bigserial', primaryKey: true },
+    template_id: { type: 'integer', references: '"templates"', onDelete: 'cascade' },
+    version_tag: { type: 'text', notNull: true },   // e.g., v1.0, stable, latest
+    image: { type: 'text' },
+    cpu: { type: 'integer' },
+    memory_mb: { type: 'integer' },
+    disk_mb: { type: 'integer' },
+    init_script: { type: 'text' },
+    metadata: { type: 'jsonb' },
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('template_versions', ['template_id']);
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION promote_template_version(p_template_id integer, p_version_id integer) RETURNS void AS $$
+    DECLARE v_row template_versions%ROWTYPE;
+    BEGIN
+      SELECT * INTO v_row FROM template_versions WHERE id = p_version_id AND template_id = p_template_id;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Version not found';
+      END IF;
+      UPDATE templates SET image = v_row.image, default_cpu = v_row.cpu, default_memory_mb = v_row.memory_mb, default_disk_mb = v_row.disk_mb, init_script = v_row.init_script, updated_at = now() WHERE id = p_template_id;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.sql(`DROP FUNCTION IF EXISTS promote_template_version(integer, integer);`);
+  pgm.dropTable('template_versions');
+};
+
+--- End of Migration: 1695472100000_template_versioning.js ---
+
+--- Migration: 1695472200000_lxc_operation_queue_and_audit.js ---
+File: migrations/1695472200000_lxc_operation_queue_and_audit.js
+
+/* 1695472200000_lxc_operation_queue_and_audit.js
+   Adds a queue table for backend LXC operations and a detailed operations audit table
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.createTable('operation_queue', {
+    id: { type: 'bigserial', primaryKey: true },
+    container_id: { type: 'integer', references: '"containers"', onDelete: 'cascade' },
+    operation: { type: 'text', notNull: true }, // operations: create, start, stop, snapshot, delete
+    payload: { type: 'jsonb' },
+    status: { type: 'text', notNull: true, default: 'pending' }, // pending, in_progress, completed, failed
+    attempts: { type: 'integer', notNull: true, default: 0 },
+    scheduled_at: { type: 'timestamp' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('operation_queue', ['status']);
+  pgm.addIndex('operation_queue', ['scheduled_at']);
+
+  pgm.createTable('operation_audit', {
+    id: { type: 'bigserial', primaryKey: true },
+    operation_queue_id: { type: 'integer', references: '"operation_queue"', onDelete: 'set null' },
+    container_id: { type: 'integer', references: '"containers"', onDelete: 'set null' },
+    action: { type: 'text' }, // start, progress, complete, fail
+    details: { type: 'jsonb' },
+    created_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') }
+  });
+
+  pgm.addIndex('operation_audit', ['container_id']);
+};
+
+exports.down = (pgm) => {
+  pgm.dropTable('operation_audit');
+  pgm.dropTable('operation_queue');
+};
+
+--- End of Migration: 1695472200000_lxc_operation_queue_and_audit.js ---
+
+--- Migration: 1695472300000_billing_and_export.js ---
+File: migrations/1695472300000_billing_and_export.js
+
+/* 1695472300000_billing_and_export.js
+   Adds a usage_exports table and a simple generate_usage_export function.
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  pgm.createTable('usage_exports', {
+    id: { type: 'bigserial', primaryKey: true },
+    generated_by: { type: 'integer', references: '"users"', onDelete: 'set null' },
+    period_start: { type: 'date' },
+    period_end: { type: 'date' },
+    status: { type: 'text', notNull: true, default: 'pending' }, // pending, ready, failed
+    storage_path: { type: 'text' }, // path to CSV export
+    created_at: { type: 'timestamp', notNull: true, default: pgm.func('current_timestamp') },
+    completed_at: { type: 'timestamp' }
+  });
+
+  pgm.addIndex('usage_exports', ['status']);
+
+  pgm.sql(`
+    CREATE OR REPLACE FUNCTION generate_usage_export(p_start date, p_end date, p_user_id integer) RETURNS integer AS $$
+    DECLARE
+      v_id integer;
+      v_path text;
+    BEGIN
+      INSERT INTO usage_exports(generated_by, period_start, period_end, status, created_at)
+      VALUES (p_user_id, p_start, p_end, 'pending', now()) RETURNING id INTO v_id;
+
+      v_path := '/root/ParkarLabs/db/q/usage_export_' || v_id || '.csv';
+
+      EXECUTE format('COPY (SELECT * FROM usage_counters WHERE period_start BETWEEN %L AND %L) TO %L WITH CSV HEADER', p_start::text, p_end::text, v_path);
+
+      UPDATE usage_exports SET storage_path = v_path, status = 'ready', completed_at = now() WHERE id = v_id;
+
+      RETURN v_id;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.sql(`DROP FUNCTION IF EXISTS generate_usage_export(date, date, integer);`);
+  pgm.dropTable('usage_exports');
+};
+
+--- End of Migration: 1695472300000_billing_and_export.js ---
+
+--- Migration: 1695472400000_housekeeping_and_health.js ---
+File: migrations/1695472400000_housekeeping_and_health.js
+
+/* 1695472400000_housekeeping_and_health.js
+   Adds safe/indexes and db_health view with idempotency (CREATE INDEX IF NOT EXISTS).
+*/
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // create indexes only if missing (use raw SQL for IF NOT EXISTS)
+  pgm.sql("CREATE INDEX IF NOT EXISTS containers_owner_user_id_index ON containers (owner_user_id);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS containers_status_id_index ON containers (status_id);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS tasks_created_by_index ON tasks (created_by);");
+  pgm.sql("CREATE INDEX IF NOT EXISTS tasks_title_index ON tasks (title);");
+
+  // create or replace view
+  pgm.sql(`
+    CREATE OR REPLACE VIEW db_health AS
+    SELECT
+      (SELECT count(*) FROM containers) AS total_containers,
+      (SELECT count(*) FROM containers WHERE status_id = (SELECT id FROM container_statuses WHERE name='running' LIMIT 1)) AS running_containers,
+      (SELECT count(*) FROM users) AS total_users,
+      (SELECT count(*) FROM assignments WHERE status = 'assigned') AS assigned_tasks,
+      now() AS last_checked;
+  `);
+
+  // comments (idempotent) - use valid JS strings to issue SQL comment commands
+  pgm.sql("COMMENT ON TABLE usage_counters IS 'Daily usage counters for quotas and billing';");
+  pgm.sql("COMMENT ON TABLE operation_queue IS 'Queue of LXC operations to be processed by backend worker';");
+};
+
+exports.down = (pgm) => {
+  pgm.sql("DROP VIEW IF EXISTS db_health;");
+  pgm.sql("DROP INDEX IF EXISTS containers_owner_user_id_index;");
+  pgm.sql("DROP INDEX IF EXISTS containers_status_id_index;");
+  pgm.sql("DROP INDEX IF EXISTS tasks_created_by_index;");
+  pgm.sql("DROP INDEX IF EXISTS tasks_title_index;");
+  pgm.sql("COMMENT ON TABLE usage_counters IS NULL;");
+  pgm.sql("COMMENT ON TABLE operation_queue IS NULL;");
+};
+
+--- End of Migration: 1695472400000_housekeeping_and_health.js ---
+
+
+=========================================
+SEED DATA
+=========================================
+
+--- Seed: import_worker_example.js ---
+File: seeds/import_worker_example.js
+
+// seeds/import_worker_example.js
+// Lightweight CSV importer example. Use in dev to test import_jobs processing.
+require('dotenv').config();
+const fs = require('fs');
+const { Client } = require('pg');
+const csv = require('csv-parse/sync'); // run `npm i csv-parse` if needed
+
+(async () => {
+  const client = new Client({
+    host: process.env.PGHOST, port: process.env.PGPORT, user: process.env.PGUSER,
+    password: process.env.PGPASSWORD, database: process.env.PGDATABASE
+  });
+  await client.connect();
+
+  try {
+    // find pending imports
+    const { rows } = await client.query("SELECT id, storage_path FROM import_jobs WHERE status='pending' LIMIT 1");
+    if (!rows.length) {
+      console.log('No pending import jobs.');
+      return;
+    }
+    const job = rows[0];
+    console.log('Processing job', job.id, job.storage_path);
+
+    // mark started
+    await client.query("UPDATE import_jobs SET status='processing', started_at=NOW() WHERE id=$1", [job.id]);
+
+    // read file (local path)
+    const data = fs.readFileSync(job.storage_path, 'utf8');
+    const records = csv.parse(data, { columns: true, skip_empty_lines: true });
+
+    // naive import example: assume columns for courses: title, description
+    for (let i = 0; i < records.length; i++) {
+      const row = records[i];
+      try {
+        await client.query(`INSERT INTO courses(title, description, created_at) VALUES($1,$2,NOW())`, [row.title || 'untitled', row.description || '']);
+      } catch (e) {
+        await client.query(`INSERT INTO import_errors(import_job_id,row_number,error_message,payload,created_at) VALUES($1,$2,$3,$4,NOW())`, [job.id, i+1, e.message, JSON.stringify(row)]);
+      }
+    }
+
+    await client.query("UPDATE import_jobs SET status='completed', completed_at=NOW() WHERE id=$1", [job.id]);
+    console.log('Import complete');
+  } catch (e) {
+    console.error('Import failed', e);
+    await client.query("UPDATE import_jobs SET status='failed', failed_at=NOW() WHERE id=$1", [job && job.id]);
+  } finally {
+    await client.end();
+  }
+})();
+
+--- End of Seed: import_worker_example.js ---
+
+--- Seed: run-seeds-full.js ---
+File: seeds/run-seeds-full.js
+
+// seeds/run-seeds-full.js
+require('dotenv').config();
+const { Client } = require('pg');
+
+(async () => {
+  const client = new Client({
+    host: process.env.PGHOST,
+    port: process.env.PGPORT,
+    user: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+    database: process.env.PGDATABASE,
+  });
+  await client.connect();
+
+  try {
+    // default roles
+    await client.query(`INSERT INTO roles (name, description) VALUES
+      ('admin','Full system access'),
+      ('manager','Manage courses and assignments'),
+      ('employee','Consume courses and use lab')
+      ON CONFLICT DO NOTHING;`);
+
+    // default permissions (simple)
+    await client.query(`INSERT INTO permissions (name, description) VALUES
+      ('courses:manage','Create/edit/delete courses'),
+      ('assignments:manage','Assign tasks to users'),
+      ('containers:manage','Provision/stop containers'),
+      ('users:manage','Create/edit users & teams')
+      ON CONFLICT DO NOTHING;`);
+
+    // link admin -> all permissions
+    const admin = await client.query(`SELECT id FROM roles WHERE name='admin' LIMIT 1`);
+    if (admin.rows.length) {
+      const adminId = admin.rows[0].id;
+      const permRes = await client.query(`SELECT id FROM permissions`);
+      for (const p of permRes.rows) {
+        await client.query(`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [adminId, p.id]);
+      }
+    }
+
+    // create a default admin user if not exists
+    const adminUser = await client.query(`SELECT id FROM users WHERE email='admin@local' LIMIT 1`);
+    if (!adminUser.rows.length) {
+      const roleId = (await client.query(`SELECT id FROM roles WHERE name='admin' LIMIT 1`)).rows[0].id;
+      const res = await client.query(
+        `INSERT INTO users(azure_ad_id, name, email, role_id) VALUES ($1,$2,$3,$4) RETURNING id`,
+        ['admin-azure', 'Admin User', 'admin@local', roleId]
+      );
+      console.log('Created admin user id', res.rows[0].id);
+    }
+
+    // dependency presets (basic MERN)
+    await client.query(`
+      INSERT INTO dependency_sets (name, description, script, created_at)
+      VALUES ('MERN','MongoDB + Node + npm environment','#!/bin/bash\napt update && apt install -y nodejs npm mongodb', NOW())
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // default template
+    await client.query(`
+      INSERT INTO templates (name, image, default_cpu, default_memory_mb, default_disk_mb, network_profile, init_script, created_at)
+      VALUES ('ubuntu-24-default','ubuntu:24.04',1,2048,20480,'bridge','#!/bin/bash\n# init\n', NOW())
+      ON CONFLICT DO NOTHING;
+    `);
+
+    console.log('Full seeds applied');
+  } catch (e) {
+    console.error(e);
+  } finally {
+    await client.end();
+  }
+})();
+
+--- End of Seed: run-seeds-full.js ---
+
+--- Seed: run-seeds.js ---
+File: seeds/run-seeds.js
+
+// seeds/run-seeds.js
+require('dotenv').config();
+const { Client } = require('pg');
+
+const client = new Client({
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+  database: process.env.PGDATABASE,
+});
+
+const roles = [
+  { name: 'admin', description: 'Full system access' },
+  { name: 'manager', description: 'Manage courses and assignments' },
+  { name: 'employee', description: 'Consume courses and use lab' }
+];
+
+const permissions = [
+  { name: 'courses:manage', description: 'Create/edit/delete courses' },
+  { name: 'assignments:manage', description: 'Assign tasks to users' },
+  { name: 'containers:manage', description: 'Provision/stop containers' },
+  { name: 'users:manage', description: 'Create/edit users & teams' }
+];
+
+(async () => {
+  await client.connect();
+  try {
+    for (const r of roles) {
+      await client.query(
+        `INSERT INTO roles(name, description) VALUES($1,$2) ON CONFLICT (name) DO NOTHING`,
+        [r.name, r.description]
+      );
+    }
+    for (const p of permissions) {
+      await client.query(
+        `INSERT INTO permissions(name, description) VALUES($1,$2) ON CONFLICT (name) DO NOTHING`,
+        [p.name, p.description]
+      );
+    }
+    // link admin -> all permissions
+    const res = await client.query(`SELECT id FROM roles WHERE name = 'admin'`);
+    if (res.rows.length) {
+      const adminId = res.rows[0].id;
+      const permRows = await client.query(`SELECT id FROM permissions`);
+      for (const pr of permRows.rows) {
+        await client.query(
+          `INSERT INTO role_permissions(role_id, permission_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,
+          [adminId, pr.id]
+        );
+      }
+    }
+    console.log('Seeds applied');
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  } finally {
+    await client.end();
+  }
+})();
+
+--- End of Seed: run-seeds.js ---
+
+--- Seed: run-session-seed.js ---
+File: seeds/run-session-seed.js
+
+// seeds/run-session-seed.js
+require('dotenv').config();
+const { Client } = require('pg');
+
+(async () => {
+  const client = new Client({
+    host: process.env.PGHOST,
+    port: process.env.PGPORT,
+    user: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+    database: process.env.PGDATABASE,
+  });
+  await client.connect();
+
+  try {
+    // No default seed needed; but create sample ephemeral key for dev_user (if exists)
+    const res = await client.query(`SELECT id FROM users LIMIT 1`);
+    if (res.rows.length) {
+      const uid = res.rows[0].id;
+      await client.query(
+        `INSERT INTO ssh_keys(user_id, key_type, public_key, label, ephemeral, expires_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [uid, 'ssh-ed25519', 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyForDev', 'dev-temp', true, new Date(Date.now() + 3600 * 1000).toISOString()]
+      );
+      console.log('Inserted a sample ephemeral SSH key for user', uid);
+    } else {
+      console.log('No users found to seed ssh_keys.');
+    }
+  } catch (e) {
+    console.error(e);
+  } finally {
+    await client.end();
+  }
+})();
+
+--- End of Seed: run-session-seed.js ---
+
+
+=========================================
+UTILITY SCRIPTS
+=========================================
+
+--- Script: backup_db.sh ---
+File: scripts/backup_db.sh
+
+#!/usr/bin/env bash
+# scripts/backup_db.sh
+# Usage: ./scripts/backup_db.sh [full|schema|data] /path/to/output.sql
+# Example: ./scripts/backup_db.sh full /root/ParkarLabs/db/backups/parkarlabs_full_$(date +%F).sql
+set -euo pipefail
+
+MODE="${1:-full}"
+OUT="${2:-/root/ParkarLabs/db/q/backup_$(date +%F_%H%M%S).sql}"
+
+# load env
+cd "$(dirname "$0")/.."
+export $(grep -v '^#' .env | xargs)
+
+case "$MODE" in
+  full)
+    echo "Running full dump -> $OUT"
+    pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -F p -f "$OUT" "$PGDATABASE"
+    ;;
+  schema)
+    echo "Dumping schema only -> $OUT"
+    pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -s -f "$OUT" "$PGDATABASE"
+    ;;
+  data)
+    echo "Dumping data only -> $OUT"
+    pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -a -f "$OUT" "$PGDATABASE"
+    ;;
+  *)
+    echo "Unknown mode: $MODE"
+    exit 1
+    ;;
+esac
+
+echo "Backup complete: $OUT"
+
+--- End of Script: backup_db.sh ---
+
+--- Script: connect.sh ---
+File: scripts/connect.sh
+
+#!/usr/bin/env bash
+# Connect to PostgreSQL from WSL
+
+# load env from project root (db/.env)
+if [ -f "$(dirname "$0")/../.env" ]; then
+  export $(grep -v '^#' "$(dirname "$0")/../.env" | xargs)
+else
+  echo "ERROR: .env file not found at $(dirname "$0")/../.env"
+  exit 1
+fi
+
+# build connection URI
+PG_CONN_URI="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+# connect
+psql "$PG_CONN_URI"
+
+
+--- End of Script: connect.sh ---
+
+--- Script: generate_usage_export.sh ---
+File: scripts/generate_usage_export.sh
+
+#!/usr/bin/env bash
+# Usage: ./generate_usage_export.sh 2025-09-01 2025-09-30 [user_id]
+set -euo pipefail
+START_DATE="${1:-}"
+END_DATE="${2:-}"
+USER_ID="${3:-NULL}"
+
+if [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; then
+  echo "Usage: $0 <start_date> <end_date> [user_id]"
+  exit 2
+fi
+
+cd "$(dirname "$0")/.."
+
+# call the generate_usage_export function (function inserts record and writes CSV to q/)
+if [ "$USER_ID" = "NULL" ]; then
+  ./scripts/connect.sh <<PSQL
+SELECT generate_usage_export('${START_DATE}'::date, '${END_DATE}'::date, NULL::integer) AS export_id;
+\q
+PSQL
+else
+  ./scripts/connect.sh <<PSQL
+SELECT generate_usage_export('${START_DATE}'::date, '${END_DATE}'::date, ${USER_ID}::integer) AS export_id;
+\q
+PSQL
+fi
+
+--- End of Script: generate_usage_export.sh ---
+
+--- Script: generate_usage_export_client.sh ---
+File: scripts/generate_usage_export_client.sh
+
+#!/usr/bin/env bash
+# usage: ./scripts/generate_usage_export_client.sh 2025-09-01 2025-09-30 [out_path]
+START="${1:?start date YYYY-MM-DD}"
+END="${2:?end date YYYY-MM-DD}"
+OUT="${3:-$(pwd)/q/usage_export_${START}_to_${END}.csv}"
+mkdir -p "$(dirname "$OUT")"
+
+# Ensure we run from project root so ./scripts/connect.sh is found
+cd "$(dirname "$0")/.." || { echo "cannot chdir"; exit 1; }
+
+# Use client-side \copy so DB role privileges are not needed
+./scripts/connect.sh <<PSQL
+\\copy (SELECT * FROM usage_counters WHERE period_start BETWEEN '${START}' AND '${END}') TO '${OUT}' CSV HEADER
+PSQL
+
+echo "Wrote ${OUT}"
+
+--- End of Script: generate_usage_export_client.sh ---
+
+--- Script: refresh_monitoring_views.sh ---
+File: scripts/refresh_monitoring_views.sh
+
+#!/usr/bin/env bash
+# refresh monitoring materialized views (concurrent when possible)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# uses ./scripts/connect.sh to get into psql
+./scripts/connect.sh <<'PSQL'
+SELECT refresh_monitoring_materialized_views();
+\echo 'refreshed'
+PSQL
+
+--- End of Script: refresh_monitoring_views.sh ---
+
+--- Script: restore_db.sh ---
+File: scripts/restore_db.sh
+
+#!/usr/bin/env bash
+# scripts/restore_db.sh
+# Usage: ./scripts/restore_db.sh /path/to/backup.sql
+set -euo pipefail
+BACKUP_FILE="${1:?backup file required}"
+cd "$(dirname "$0")/.."
+export $(grep -v '^#' .env | xargs)
+echo "Restoring $BACKUP_FILE into $PGDATABASE"
+psql "postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}" -f "$BACKUP_FILE"
+echo "Restore finished"
+
+--- End of Script: restore_db.sh ---
+
+--- Script: run_retention.sh ---
+File: scripts/run_retention.sh
+
+#!/usr/bin/env bash
+# run_retention.sh — call retention functions in DB
+cd "$(dirname "$0")/.."
+export $(grep -v '^#' .env | xargs)
+
+psql "postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}" <<'SQL'
+-- Move audit logs older than 90 days to archive
+SELECT move_old_audit_logs(90);
+
+-- Purge metrics older than 30 days
+SELECT purge_old_metrics(30);
+
+-- Remove expired ephemeral SSH keys
+DELETE FROM ssh_keys WHERE ephemeral = true AND expires_at < now();
+SQL
+
+--- End of Script: run_retention.sh ---
+
+
+=========================================
+FUNCTIONS LIST
+=========================================
+
+File not found: functions_list.txt
+
+
+=========================================
+DIRECTORY STRUCTURE
+=========================================
+
+Directory listing:
+total 160
+drwxr-xr-x  8 root root  4096 Sep 25 11:21 .
+drwxr-xr-x  5 root root  4096 Sep 25 09:14 ..
+-rw-r--r--  1 root root   247 Sep 23 13:50 .env
+-rw-r--r--  1 root root 78892 Sep 25 11:21 database_analysis_complete.txt
+-rw-r--r--  1 root root     0 Sep 23 12:17 init.sql
+-rw-r--r--  1 root root   293 Sep 23 12:26 migrate.config.js
+drwxr-xr-x  2 root root  4096 Sep 23 14:52 migrations
+-rw-r--r--  1 root root     0 Sep 23 17:31 nano
+drwxr-xr-x 56 root root  4096 Sep 23 15:26 node_modules
+-rw-r--r--  1 root root 31667 Sep 23 15:26 package-lock.json
+-rw-r--r--  1 root root   588 Sep 23 14:27 package.json
+-rw-r--r--  1 root root     0 Sep 23 17:31 psql
+drwxr-xr-x  2 root root  4096 Sep 23 15:07 q
+-rw-r--r--  1 root root     0 Sep 23 12:56 q.backup
+drwxr-xr-x  2 root root  4096 Sep 23 12:27 schemas
+drwxr-xr-x  2 root root  4096 Sep 23 15:07 scripts
+drwxr-xr-x  2 root root  4096 Sep 23 14:20 seeds
+-rwxr-xr-x  1 root root  3444 Sep 25 11:21 simple_db_extractor.sh
+
+Migration files:
+total 120
+drwxr-xr-x 2 root root 4096 Sep 23 14:52 .
+drwxr-xr-x 8 root root 4096 Sep 25 11:21 ..
+-rw-r--r-- 1 root root 2810 Sep 23 12:35 1695470000000_create_core_types_and_tables.js
+-rw-r--r-- 1 root root 1280 Sep 23 12:36 1695470100000_create_courses_modules.js
+-rw-r--r-- 1 root root 2080 Sep 23 12:38 1695470200000_create_tasks_assignments.js
+-rw-r--r-- 1 root root 1898 Sep 23 12:39 1695470300000_create_templates_and_dependencies.js
+-rw-r--r-- 1 root root 2329 Sep 23 12:39 1695470400000_create_containers_and_snapshots.js
+-rw-r--r-- 1 root root 3708 Sep 23 13:17 1695470500000_create_audit_import_and_metrics.js
+-rw-r--r-- 1 root root 5501 Sep 23 13:18 1695470600000_create_shared_tables_and_indexes.js
+-rw-r--r-- 1 root root 1787 Sep 23 13:18 1695470700000_create_audit_triggers.js
+-rw-r--r-- 1 root root 2354 Sep 23 13:26 1695470800000_add_constraints_and_checks.js
+-rw-r--r-- 1 root root 3181 Sep 23 13:22 1695470900000_adjust_fk_ondelete_behaviour.js
+-rw-r--r-- 1 root root  889 Sep 23 13:22 1695471000000_enforce_assignment_status_fk_like.js
+-rw-r--r-- 1 root root 4506 Sep 23 13:46 1695471100000_sessions_sshkeys_usage_and_retention.js
+-rw-r--r-- 1 root root 2392 Sep 23 13:52 1695471200000_quota_functions.js
+-rw-r--r-- 1 root root 1056 Sep 23 13:52 1695471300000_snapshot_helpers.js
+-rw-r--r-- 1 root root 4946 Sep 23 13:56 1695471400000_dbroles_rls_and_triggers.js
+-rw-r--r-- 1 root root 2056 Sep 23 13:58 1695471500000_transactional_container_provisioning.js
+-rw-r--r-- 1 root root 1379 Sep 23 14:51 1695471600000_web_ssh_sessions.js
+-rw-r--r-- 1 root root 3314 Sep 23 14:51 1695471700000_container_lifecycle.js
+-rw-r--r-- 1 root root  876 Sep 23 14:51 1695471800000_search_indexes.js
+-rw-r--r-- 1 root root 1917 Sep 23 14:52 1695471900000_monitoring_views.js
+-rw-r--r-- 1 root root  918 Sep 23 14:52 1695472000000_import_job_improvements.js
+-rw-r--r-- 1 root root 1695 Sep 23 14:20 1695472100000_template_versioning.js
+-rw-r--r-- 1 root root 1632 Sep 23 14:30 1695472200000_lxc_operation_queue_and_audit.js
+-rw-r--r-- 1 root root 1669 Sep 23 14:32 1695472300000_billing_and_export.js
+-rw-r--r-- 1 root root 1812 Sep 23 14:44 1695472400000_housekeeping_and_health.js
+
+Seed files:
+total 24
+drwxr-xr-x 2 root root 4096 Sep 23 14:20 .
+drwxr-xr-x 8 root root 4096 Sep 25 11:21 ..
+-rw-r--r-- 1 root root 2043 Sep 23 14:20 import_worker_example.js
+-rw-r--r-- 1 root root 2741 Sep 23 13:56 run-seeds-full.js
+-rw-r--r-- 1 root root 1875 Sep 23 12:40 run-seeds.js
+-rw-r--r-- 1 root root 1102 Sep 23 13:38 run-session-seed.js
+

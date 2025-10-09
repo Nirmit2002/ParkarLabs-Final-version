@@ -1,0 +1,61 @@
+{
+  "summary": {
+    "totalTables": 2,
+    "tableNames": [
+      "audit_logs_archive",
+      "IF"
+    ]
+  },
+  "tables": {
+    "audit_logs_archive": {
+      "columns": [
+        {
+          "name": "LIKE",
+          "type": "audit_logs",
+          "nullable": true
+        }
+      ],
+      "source": "1695471100000_sessions_sshkeys_usage_and_retention.js"
+    },
+    "IF": {
+      "columns": [
+        {
+          "name": "`",
+          "type": "CREATE",
+          "nullable": true
+        },
+        {
+          "name": "container_id",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "old_status_id",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "new_status_id",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "changed_by",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "changed_at",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ],
+      "source": "1695471700000_container_lifecycle.js"
+    }
+  }
+}
