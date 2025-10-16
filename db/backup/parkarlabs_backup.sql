@@ -1,58 +1,169 @@
--- ParkarLabs Database Backup
--- Generated on: 2025-10-16T14:44:00.348Z
+-- ParkarLabs Complete Database Backup
+-- Generated on: 2025-10-16T15:00:48.655Z
+-- Includes: Schema + Data
 --
--- This file contains the complete database schema and data
--- To restore, run: psql -U postgres -d parkarlabs_db -f parkarlabs_backup.sql
+-- To restore on new server:
+--   1. Create database: sudo -u postgres psql -c "CREATE DATABASE parkarlabs_db;"
+--   2. Import: sudo -u postgres psql -d parkarlabs_db -f parkarlabs_backup.sql
 
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 
--- Data for table: roles
-TRUNCATE TABLE roles RESTART IDENTITY CASCADE;
+-- Drop existing tables if they exist
+DROP TABLE IF EXISTS audit_logs CASCADE;
+DROP TABLE IF EXISTS assignments CASCADE;
+DROP TABLE IF EXISTS containers CASCADE;
+DROP TABLE IF EXISTS courses CASCADE;
+DROP TABLE IF EXISTS ssh_keys CASCADE;
+DROP TABLE IF EXISTS sessions CASCADE;
+DROP TABLE IF EXISTS local_auth CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS container_statuses CASCADE;
+DROP TABLE IF EXISTS roles CASCADE;
+
+
+-- Create roles table
+CREATE TABLE IF NOT EXISTS roles (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create container_statuses table
+CREATE TABLE IF NOT EXISTS container_statuses (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT
+);
+
+-- Create users table
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    azure_ad_id VARCHAR(255) UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    role_id INTEGER REFERENCES roles(id),
+    status VARCHAR(50) DEFAULT 'active',
+    provisioning_pref JSONB,
+    profile_pic VARCHAR(500),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create local_auth table
+CREATE TABLE IF NOT EXISTS local_auth (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id)
+);
+
+-- Create sessions table
+CREATE TABLE IF NOT EXISTS sessions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(50),
+    provider_account_id VARCHAR(255),
+    meta JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create ssh_keys table
+CREATE TABLE IF NOT EXISTS ssh_keys (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    key_name VARCHAR(255) NOT NULL,
+    public_key TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create courses table
+CREATE TABLE IF NOT EXISTS courses (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    image_url VARCHAR(500),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create containers table
+CREATE TABLE IF NOT EXISTS containers (
+    id SERIAL PRIMARY KEY,
+    owner_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    docker_id VARCHAR(255),
+    image VARCHAR(255),
+    status_id INTEGER REFERENCES container_statuses(id),
+    ports JSONB,
+    environment JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create assignments table
+CREATE TABLE IF NOT EXISTS assignments (
+    id SERIAL PRIMARY KEY,
+    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
+    assigned_to_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    assigned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status VARCHAR(50) DEFAULT 'assigned',
+    due_date TIMESTAMP,
+    completed_at TIMESTAMP,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create audit_logs table
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(100) NOT NULL,
+    target_type VARCHAR(100),
+    target_id VARCHAR(100),
+    meta JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+
+-- Data for table: roles (3 rows)
 INSERT INTO roles (id, name, description, created_at) VALUES (1, 'admin', 'Full system access', '2025-09-23T12:42:30.888Z');
 INSERT INTO roles (id, name, description, created_at) VALUES (2, 'manager', 'Manage courses and assignments', '2025-09-23T12:42:30.894Z');
 INSERT INTO roles (id, name, description, created_at) VALUES (3, 'employee', 'Consume courses and use lab', '2025-09-23T12:42:30.896Z');
 
--- Data for table: container_statuses
-TRUNCATE TABLE container_statuses RESTART IDENTITY CASCADE;
+-- Data for table: container_statuses (5 rows)
 INSERT INTO container_statuses (id, name) VALUES (1, 'creating');
 INSERT INTO container_statuses (id, name) VALUES (2, 'running');
 INSERT INTO container_statuses (id, name) VALUES (3, 'stopped');
 INSERT INTO container_statuses (id, name) VALUES (4, 'failed');
 INSERT INTO container_statuses (id, name) VALUES (5, 'deleting');
 
--- Data for table: users
-TRUNCATE TABLE users RESTART IDENTITY CASCADE;
+-- Data for table: users (4 rows)
 INSERT INTO users (id, azure_ad_id, name, email, role_id, public_ssh_key, status, created_at, provisioning_pref, profile_pic) VALUES (3, 'admin-azure', 'Admin User', 'admin@parkar.digital', 1, NULL, 'active', '2025-09-23T13:58:07.990Z', NULL, NULL);
 INSERT INTO users (id, azure_ad_id, name, email, role_id, public_ssh_key, status, created_at, provisioning_pref, profile_pic) VALUES (19, 'local_1760624714139', 'Jigar Shah', 'Jigars@parkar.digital', 1, NULL, 'active', '2025-10-16T14:25:14.140Z', NULL, '/uploads/profiles/user-19-1760624965087-725647087.png');
 INSERT INTO users (id, azure_ad_id, name, email, role_id, public_ssh_key, status, created_at, provisioning_pref, profile_pic) VALUES (20, 'local_1760625038934', 'Milin Narendra', 'mnarendra@parkar.digital', 1, NULL, 'active', '2025-10-16T14:30:38.934Z', NULL, '/uploads/profiles/user-20-1760625068530-857158353.jfif');
 INSERT INTO users (id, azure_ad_id, name, email, role_id, public_ssh_key, status, created_at, provisioning_pref, profile_pic) VALUES (21, 'f2ecca71f1273df35e628059a0df5918', 'Nirmit Panchal', 'npanchal@parkar.digital', 3, NULL, 'active', '2025-10-16T14:32:04.114Z', NULL, NULL);
 
--- Data for table: local_auth
-TRUNCATE TABLE local_auth RESTART IDENTITY CASCADE;
+-- Data for table: local_auth (3 rows)
 INSERT INTO local_auth (id, user_id, email, password_hash, created_at) VALUES ('6', 19, 'Jigars@parkar.digital', '$2a$10$FNeWaLGalOI7sGi3FYXaJ.qsrCfUGEhNXzdNsdaZCx1un2pU1mDka', '2025-10-16T14:25:14.244Z');
 INSERT INTO local_auth (id, user_id, email, password_hash, created_at) VALUES ('7', 20, 'MNarendra@parkar.digital', '$2a$10$lR/XqhkKtWOnokiOvi/6IOFV.QSBc2cgICPHur6MzNQPdGfKpngMW', '2025-10-16T14:30:39.033Z');
 INSERT INTO local_auth (id, user_id, email, password_hash, created_at) VALUES ('8', 21, 'npanchal@parkar.digital', '$2a$12$FMEgltQNDYXeWFrHred6Vu0Ayaln3BSe0M0nSJVfV8vpAviMhC1U2', '2025-10-16T14:36:16.009Z');
 
--- Data for table: sessions
-TRUNCATE TABLE sessions RESTART IDENTITY CASCADE;
+-- Data for table: sessions (1 rows)
 INSERT INTO sessions (id, user_id, provider, provider_account_id, token_expires_at, refresh_token_hash, meta, created_at, last_active_at) VALUES ('10', 21, 'local', 'npanchal@parkar.digital', NULL, NULL, '{"password_hash":"$2a$12$FMEgltQNDYXeWFrHred6Vu0Ayaln3BSe0M0nSJVfV8vpAviMhC1U2"}', '2025-10-16T14:32:04.114Z', NULL);
-
 -- Table ssh_keys is empty
 
--- Data for table: courses
-TRUNCATE TABLE courses RESTART IDENTITY CASCADE;
+
+-- Data for table: courses (1 rows)
 INSERT INTO courses (id, title, slug, description, created_by, visibility, created_at, search_vector) VALUES (7, 'AIOps and MLOps Course', 'aiops-and-mlops-course', 'Complete 9-month training program covering Python, ML, Cloud AI, AIOps Tools, Observability, Data Engineering, and IT Operations', NULL, 'private', '2025-10-10T09:44:51.682Z', '''9'':6 ''ai'':14 ''aiop'':1,15 ''cloud'':13 ''complet'':5 ''cours'':4 ''cover'':10 ''data'':18 ''engin'':19 ''ml'':12 ''mlop'':3 ''month'':7 ''observ'':17 ''oper'':22 ''program'':9 ''python'':11 ''tool'':16 ''train'':8');
 
--- Data for table: containers
-TRUNCATE TABLE containers RESTART IDENTITY CASCADE;
+-- Data for table: containers (2 rows)
 INSERT INTO containers (id, lxc_name, owner_user_id, template_id, image, cpu, memory_mb, disk_mb, ip_address, status_id, metadata, started_at, stopped_at, created_at) VALUES (19, 'lab-cb4d6c', 3, NULL, 'ubuntu:24.04', 1, 1024, 10240, '127.0.0.1', 3, '{"deps":["node"],"dependencies":["node"]}', NULL, NULL, '2025-09-29T18:38:12.746Z');
 INSERT INTO containers (id, lxc_name, owner_user_id, template_id, image, cpu, memory_mb, disk_mb, ip_address, status_id, metadata, started_at, stopped_at, created_at) VALUES (21, 'lab-3146f4', 3, NULL, 'ubuntu:24.04', 1, 1024, 10240, '127.0.0.1', 3, '{"deps":["node"],"dependencies":["node"]}', NULL, NULL, '2025-09-30T09:57:47.447Z');
-
 -- Table assignments is empty
 
--- Data for table: audit_logs
-TRUNCATE TABLE audit_logs RESTART IDENTITY CASCADE;
+
+-- Data for table: audit_logs (1074 rows)
 INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, meta, created_at) VALUES ('1', NULL, 'INSERT', 'users', '1', '["(,,,,,,,)",{"changed_columns":["id","azure_ad_id","name","email","role_id","public_ssh_key","status","created_at"]}]', '2025-09-23T13:20:19.539Z');
 INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, meta, created_at) VALUES ('2', NULL, 'INSERT', 'users', '2', '["(,,,,,,,,)",{"changed_columns":["id","azure_ad_id","name","email","role_id","public_ssh_key","status","created_at","provisioning_pref"]}]', '2025-09-23T13:34:22.067Z');
 INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, meta, created_at) VALUES ('3', NULL, 'INSERT', 'tasks', '1', '["(,,,,,)",{"changed_columns":["id","title","description","created_by","related_course_id","created_at"]}]', '2025-09-23T13:34:25.747Z');
@@ -1128,7 +1239,7 @@ INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, meta,
 INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, meta, created_at) VALUES ('1076', 21, 'UPDATE', 'password', '21', '{"ip":"127.0.0.1","changed_at":"2025-10-16T14:36:16.012Z"}', '2025-10-16T14:36:16.013Z');
 INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, meta, created_at) VALUES ('1077', 21, 'LOGIN', 'user', '21', '{"ip":"127.0.0.1","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"}', '2025-10-16T14:36:40.465Z');
 
--- Reset sequences
+-- Reset sequences to continue from max id
 SELECT setval('roles_id_seq', (SELECT COALESCE(MAX(id), 1) FROM roles), true);
 SELECT setval('container_statuses_id_seq', (SELECT COALESCE(MAX(id), 1) FROM container_statuses), true);
 SELECT setval('users_id_seq', (SELECT COALESCE(MAX(id), 1) FROM users), true);

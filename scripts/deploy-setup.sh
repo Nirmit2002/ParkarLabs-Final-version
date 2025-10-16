@@ -87,27 +87,24 @@ EOF
 
 print_success "Database configured"
 
-# Step 6: Import Database Schema
-print_header "Step 6: Setting Up Database Schema"
-if [ -f "$PROJECT_DIR/db/schema/schema.sql" ]; then
-    sudo -u postgres psql -d parkarlabs_db -f "$PROJECT_DIR/db/schema/schema.sql" 2>&1 | grep -v "already exists" || true
-    print_success "Database schema imported"
-else
-    print_warning "Schema file not found, skipping..."
-fi
-
-# Step 7: Import Data
-print_header "Step 7: Importing Database Data"
+# Step 6: Import Database (Schema + Data)
+print_header "Step 6: Importing Complete Database"
 if [ -f "$PROJECT_DIR/db/backup/parkarlabs_backup.sql" ]; then
-    print_info "Importing database backup..."
-    sudo -u postgres psql -d parkarlabs_db -f "$PROJECT_DIR/db/backup/parkarlabs_backup.sql" 2>&1 | grep -v "ERROR" || true
-    print_success "Database data imported"
+    print_info "Importing database backup (schema + data)..."
+
+    # Fix file permissions
+    chmod 644 "$PROJECT_DIR/db/backup/parkarlabs_backup.sql"
+
+    # Import the complete backup
+    sudo -u postgres psql -d parkarlabs_db -f "$PROJECT_DIR/db/backup/parkarlabs_backup.sql" 2>&1 | head -50
+    print_success "Database imported successfully"
 
     # Verify data import
-    USER_COUNT=$(sudo -u postgres psql -d parkarlabs_db -t -c "SELECT COUNT(*) FROM users;")
+    USER_COUNT=$(sudo -u postgres psql -d parkarlabs_db -t -c "SELECT COUNT(*) FROM users;" 2>/dev/null || echo "0")
     print_success "Users in database: $USER_COUNT"
 else
-    print_warning "Backup file not found, skipping data import..."
+    print_error "Backup file not found at: $PROJECT_DIR/db/backup/parkarlabs_backup.sql"
+    exit 1
 fi
 
 # Step 8: Configure Backend
