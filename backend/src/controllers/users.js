@@ -60,6 +60,7 @@ const getAllUsers = async (req, res) => {
         u.azure_ad_id,
         u.status,
         u.created_at,
+        u.profile_pic,
         r.name as role_name,
         r.description as role_description,
         (SELECT COUNT(*) FROM assignments WHERE assigned_to_user_id = u.id) as total_assignments,
@@ -172,7 +173,15 @@ const getUserById = async (req, res) => {
 // Create new user
 const createUser = async (req, res) => {
   try {
-    const { name, email, role_id, azure_ad_id, provisioning_pref } = req.body;
+    const { name, email, role_id, azure_ad_id, provisioning_pref, password } = req.body;
+
+    // Domain validation - only allow @parkar.digital emails
+    if (!email || !email.toLowerCase().endsWith('@parkar.digital')) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only @parkar.digital email addresses are allowed'
+      });
+    }
 
     // Check if email already exists
     const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
@@ -225,16 +234,31 @@ const createUser = async (req, res) => {
       provisioning_pref ? JSON.stringify(provisioning_pref) : null
     ]);
 
+    const userId = result.rows[0].id;
+
+    // If password is provided, hash it and create local_auth entry
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await query(
+        `INSERT INTO local_auth (user_id, email, password_hash, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [userId, email, hashedPassword]
+      );
+    }
+
     // Log the creation
     await query(
       `INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
        VALUES ($1, 'CREATE', 'user', $2, $3, NOW())`,
-      [req.user.userId, result.rows[0].id.toString(), JSON.stringify({ created_by: req.user.name })]
+      [req.user.userId, userId.toString(), JSON.stringify({
+        created_by: req.user.name,
+        has_local_auth: !!password
+      })]
     );
 
     res.status(201).json({
       success: true,
-      message: 'User created successfully',
+      message: password ? 'User created successfully with local auth account' : 'User created successfully',
       data: {
         ...result.rows[0],
         role_name: roleCheck.rows[0].name
@@ -268,6 +292,14 @@ const updateUser = async (req, res) => {
 
     // Check if email is being changed and if it conflicts
     if (email && email !== existingUser.rows[0].email) {
+      // Domain validation - only allow @parkar.digital emails
+      if (!email.toLowerCase().endsWith('@parkar.digital')) {
+        return res.status(403).json({
+          success: false,
+          message: 'Only @parkar.digital email addresses are allowed'
+        });
+      }
+
       const emailCheck = await query('SELECT id FROM users WHERE email = $1 AND id != $2', [email, id]);
       if (emailCheck.rows.length > 0) {
         return res.status(400).json({
@@ -365,7 +397,7 @@ const updateUser = async (req, res) => {
   }
 };
 
-// Delete user (soft delete by setting status to 'disabled')
+// Delete user (hard delete - permanently remove from database with cascade delete)
 const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
@@ -387,31 +419,79 @@ const deleteUser = async (req, res) => {
       });
     }
 
-    // Soft delete by setting status to 'disabled'
-    const updateQuery = `
-      UPDATE users
-      SET status = 'disabled'
-      WHERE id = $1
-      RETURNING id, name, email, status
-    `;
+    // Get counts of related data for logging
+    const containersResult = await query(
+      'SELECT COUNT(*) as count FROM containers WHERE owner_user_id = $1',
+      [id]
+    );
+    const assignmentsResult = await query(
+      'SELECT COUNT(*) as count FROM assignments WHERE assigned_to_user_id = $1',
+      [id]
+    );
 
-    const result = await query(updateQuery, [id]);
+    const containerCount = parseInt(containersResult.rows[0].count);
+    const assignmentCount = parseInt(assignmentsResult.rows[0].count);
 
-    // Log the deletion
+    // Log the deletion BEFORE deleting (since we need the user record)
     await query(
       `INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, meta, created_at)
        VALUES ($1, 'DELETE', 'user', $2, $3, NOW())`,
-      [req.user.userId, id, JSON.stringify({ deleted_by: req.user.name })]
+      [req.user.userId, id, JSON.stringify({
+        deleted_by: req.user.name,
+        deleted_user: {
+          name: existingUser.rows[0].name,
+          email: existingUser.rows[0].email,
+          role_id: existingUser.rows[0].role_id
+        },
+        cascade_deleted: {
+          containers: containerCount,
+          assignments: assignmentCount
+        }
+      })]
     );
+
+    // CASCADE DELETE: Delete all related data
+    // 1. Delete user's containers
+    if (containerCount > 0) {
+      await query('DELETE FROM containers WHERE owner_user_id = $1', [id]);
+    }
+
+    // 2. Delete assignments where user is assigned
+    await query('DELETE FROM assignments WHERE assigned_to_user_id = $1', [id]);
+
+    // 3. Delete assignments where user was the assigner
+    await query('DELETE FROM assignments WHERE assigned_by = $1', [id]);
+
+    // 4. Delete other related records (sessions, ssh_keys, local_auth have ON DELETE CASCADE in schema)
+    // These will be automatically deleted by the database
+
+    // Hard delete - permanently remove user
+    const deleteQuery = `
+      DELETE FROM users
+      WHERE id = $1
+      RETURNING id, name, email
+    `;
+
+    const result = await query(deleteQuery, [id]);
 
     res.json({
       success: true,
-      message: 'User deleted successfully',
+      message: `User deleted successfully. Removed ${containerCount} container(s) and ${assignmentCount} assignment(s).`,
       data: result.rows[0]
     });
 
   } catch (error) {
     console.error('Delete user error:', error);
+
+    // Check if it's a foreign key constraint error
+    if (error.code === '23503') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete user: User has associated records that could not be deleted.',
+        error: error.message
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Failed to delete user',

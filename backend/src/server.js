@@ -30,7 +30,7 @@ app.use(cors({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100, // limit each IP
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 500, // limit each IP (increased for development)
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -45,6 +45,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('combined'));
 }
+
+// Serve static files for uploads
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
@@ -74,10 +78,17 @@ app.use('/api/user', require('./routes/user'));
 app.use('/api/courses', require('./routes/courses'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/containers', require('./routes/containers'));
+app.use('/api/labs', require('./routes/labs'));
 
 // Added users routes (A1.3 update)
 const usersRoutes = require('./routes/users');
 app.use('/api/users', usersRoutes);
+
+// User-specific course views (filtered by assignments)
+app.use('/api/my-courses', require('./routes/userCourses'));
+
+// User profile routes
+app.use('/api/profile', require('./routes/profile'));
 
 // 404 handler
 app.use('*', (req, res) => {

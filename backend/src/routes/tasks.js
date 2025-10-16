@@ -1,13 +1,18 @@
 // src/routes/tasks.js
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { 
+const {
   getAllTasks,
   getMyTasks,
   createTask,
   assignTask,
   updateTaskStatus,
-  deleteTask
+  deleteTask,
+  getModuleTasks,
+  createModuleTask,
+  updateTask,
+  getTaskAssignedUsers,
+  unassignTask
 } = require('../controllers/tasks');
 const { requireAuth, requireManager } = require('../middleware/auth');
 
@@ -50,9 +55,16 @@ router.delete('/:id', requireManager, deleteTask);
 
 // Task assignment routes (Admin/Manager only)
 router.post('/:id/assign', requireManager, assignTaskValidation, checkValidation, assignTask);
+router.post('/:id/unassign', requireManager, unassignTask);
+router.get('/:id/assigned-users', requireManager, getTaskAssignedUsers);
 
 // User task routes (All authenticated users)
 router.get('/my-tasks', requireAuth, getMyTasks);
 router.patch('/:id/status', requireAuth, statusUpdateValidation, checkValidation, updateTaskStatus);
+
+// Module-specific task routes (Admin/Manager only)
+router.get('/modules/:moduleId', requireManager, getModuleTasks);
+router.post('/modules/:moduleId', requireManager, taskValidation, checkValidation, createModuleTask);
+router.put('/:taskId', requireManager, taskValidation, checkValidation, updateTask);
 
 module.exports = router;

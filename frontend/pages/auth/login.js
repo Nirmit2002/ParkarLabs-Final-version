@@ -73,6 +73,13 @@ export default function Login() {
     setError('');
     setSuccess('');
 
+    // Validate email domain
+    if (!formData.email.toLowerCase().endsWith('@parkar.digital')) {
+      setError('Only @parkar.digital email addresses are allowed');
+      setLoading(false);
+      return;
+    }
+
     if (isLogin) {
       // Login
       try {
@@ -82,6 +89,9 @@ export default function Login() {
         });
 
         if (response.data.success) {
+          console.log('Login response:', response.data.data);
+          console.log('User data:', response.data.data.user);
+
           localStorage.setItem('token', response.data.data.token);
           localStorage.setItem('user', JSON.stringify(response.data.data.user));
 
@@ -221,9 +231,10 @@ export default function Login() {
                     value={formData.email}
                     onChange={handleInputChange}
                     className="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-800 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-                    placeholder="you@example.com"
+                    placeholder="you@parkar.digital"
                     required
                   />
+                  <p className="mt-1 text-xs text-gray-500">Only @parkar.digital email addresses are allowed</p>
                 </div>
 
                 <div className="mb-6">
@@ -315,17 +326,6 @@ export default function Login() {
                     <span className="mr-1">←</span> Back to Homepage
                   </Link>
                 </div>
-
-                {/* Demo Credentials */}
-                {isLogin && (
-                  <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <p className="text-sm font-medium text-blue-800 mb-2">Demo Credentials:</p>
-                    <div className="text-xs text-blue-600 space-y-1">
-                      <p>Email: admin@local | Password: temp123 (Admin)</p>
-                      <p>Email: test1@example.com | Password: temp123 (Employee)</p>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>

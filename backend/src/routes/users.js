@@ -9,10 +9,12 @@ const router = express.Router();
 // Validation rules
 const createUserValidation = [
   body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be between 2 and 100 characters'),
-  body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email'),
+  body('email').isEmail().withMessage('Please provide a valid email'),
   body('role_id').isInt({ min: 1 }).withMessage('Role ID must be a positive integer'),
-  body('azure_ad_id').optional().trim().isLength({ min: 1, max: 255 }).withMessage('Azure AD ID must be valid'),
-  body('provisioning_pref').optional().isObject().withMessage('Provisioning preferences must be an object')
+  body('azure_ad_id').optional({ nullable: true, checkFalsy: true }).trim().isLength({ min: 1, max: 255 }).withMessage('Azure AD ID must be valid'),
+  body('provisioning_pref').optional({ nullable: true, checkFalsy: true }).isObject().withMessage('Provisioning preferences must be an object'),
+  body('password').optional({ nullable: true, checkFalsy: true }).isLength({ min: 6, max: 100 }).withMessage('Password must be between 6 and 100 characters'),
+  body('status').optional({ nullable: true, checkFalsy: true }).isIn(['active', 'disabled', 'suspended']).withMessage('Invalid status')
 ];
 
 const updateUserValidation = [
@@ -42,6 +44,8 @@ const getUsersQueryValidation = [
 const checkValidation = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    console.error('Validation errors:', errors.array());
+    console.error('Request body:', req.body);
     return res.status(400).json({
       success: false,
       message: 'Validation failed',

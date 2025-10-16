@@ -10,6 +10,10 @@ const nextConfig = {
         source: '/api/:path*',
         destination: 'http://localhost:5000/api/:path*', // Backend API URL
       },
+      {
+        source: '/uploads/:path*',
+        destination: 'http://localhost:5000/uploads/:path*', // Static files (profile pictures, etc.)
+      },
     ];
   },
 

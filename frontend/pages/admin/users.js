@@ -11,6 +11,7 @@ import {
   Edit,
   Trash2,
   Eye,
+  EyeOff,
   MoreVertical,
   ChevronLeft,
   ChevronRight,
@@ -22,8 +23,8 @@ import {
   Mail
 } from 'lucide-react';
 
-// API Configuration - Points to backend server
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+// API Configuration - Use Next.js API proxy
+const API_BASE_URL = '';
 
 export default function AdminUsers() {
   const router = useRouter();
@@ -59,8 +60,14 @@ export default function AdminUsers() {
     email: '',
     role_id: '',
     azure_ad_id: '',
+    password: '',
+    confirmPassword: '',
     status: 'active'
   });
+
+  // Password visibility states
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Check authentication
   useEffect(() => {
@@ -135,22 +142,62 @@ export default function AdminUsers() {
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
+
+    // Validate email domain
+    if (!formData.email.toLowerCase().endsWith('@parkar.digital')) {
+      setError('Only @parkar.digital email addresses are allowed');
+      return;
+    }
+
+    // Validate passwords match
+    if (formData.password && formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    // Validate password length if provided
+    if (formData.password && formData.password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/users`, formData);
+      // Remove confirmPassword before sending to backend
+      const { confirmPassword, ...userData } = formData;
+
+      // Ensure role_id is an integer
+      if (userData.role_id) {
+        userData.role_id = parseInt(userData.role_id);
+      }
+
+      const response = await axios.post(`${API_BASE_URL}/api/users`, userData);
       if (response.data.success) {
-        setSuccess('User created successfully');
+        setSuccess('User created successfully with local auth account');
         setShowCreateModal(false);
-        setFormData({ name: '', email: '', role_id: '', azure_ad_id: '', status: 'active' });
+        setFormData({ name: '', email: '', role_id: '', azure_ad_id: '', password: '', confirmPassword: '', status: 'active' });
+        setShowPassword(false);
+        setShowConfirmPassword(false);
         fetchUsers();
         fetchStats();
       }
     } catch (error) {
-      setError(error.response?.data?.message || 'Failed to create user');
+      console.error('Create user error:', error.response?.data);
+      const errorMsg = error.response?.data?.errors
+        ? error.response.data.errors.map(e => `${e.path}: ${e.msg}`).join(', ')
+        : error.response?.data?.message || 'Failed to create user';
+      setError(errorMsg);
     }
   };
 
   const handleUpdateUser = async (e) => {
     e.preventDefault();
+
+    // Validate email domain if email is being changed
+    if (formData.email && !formData.email.toLowerCase().endsWith('@parkar.digital')) {
+      setError('Only @parkar.digital email addresses are allowed');
+      return;
+    }
+
     try {
       const response = await axios.put(`${API_BASE_URL}/api/users/${selectedUser.id}`, formData);
       if (response.data.success) {
@@ -178,6 +225,8 @@ export default function AdminUsers() {
       }
     } catch (error) {
       setError(error.response?.data?.message || 'Failed to delete user');
+      setShowDeleteModal(false);
+      setSelectedUser(null);
     }
   };
 
@@ -445,11 +494,19 @@ export default function AdminUsers() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
-                              <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
-                                <span className="text-sm font-medium text-gray-700">
-                                  {user.name.charAt(0).toUpperCase()}
-                                </span>
-                              </div>
+                              {user.profile_pic ? (
+                                <img
+                                  src={user.profile_pic}
+                                  alt={user.name}
+                                  className="h-10 w-10 rounded-full object-cover"
+                                />
+                              ) : (
+                                <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
+                                  <span className="text-sm font-medium text-gray-700">
+                                    {user.name.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                             <div className="ml-4">
                               <div className="text-sm font-medium text-gray-900">{user.name}</div>
@@ -613,8 +670,9 @@ export default function AdminUsers() {
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       className="input"
-                      placeholder="Enter email address"
+                      placeholder="user@parkar.digital"
                     />
+                    <p className="mt-1 text-xs text-gray-500">Only @parkar.digital email addresses are allowed</p>
                   </div>
 
                   <div>
@@ -643,12 +701,62 @@ export default function AdminUsers() {
                     />
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        className="input pr-10"
+                        placeholder="Enter password (min 6 characters)"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+                        ) : (
+                          <Eye className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={formData.confirmPassword}
+                        onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                        className="input pr-10"
+                        placeholder="Confirm password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+                        ) : (
+                          <Eye className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="flex justify-end space-x-3 pt-4">
                     <button
                       type="button"
                       onClick={() => {
                         setShowCreateModal(false);
-                        setFormData({ name: '', email: '', role_id: '', azure_ad_id: '', status: 'active' });
+                        setFormData({ name: '', email: '', role_id: '', azure_ad_id: '', password: '', confirmPassword: '', status: 'active' });
+                        setShowPassword(false);
+                        setShowConfirmPassword(false);
                       }}
                       className="btn btn-secondary btn-md"
                     >
@@ -691,6 +799,7 @@ export default function AdminUsers() {
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       className="input"
                     />
+                    <p className="mt-1 text-xs text-gray-500">Only @parkar.digital email addresses are allowed</p>
                   </div>
 
                   <div>
@@ -753,8 +862,8 @@ export default function AdminUsers() {
                 <h3 className="text-lg font-medium text-gray-900 mt-2">Delete User</h3>
                 <div className="mt-2 px-7 py-3">
                   <p className="text-sm text-gray-500">
-                    Are you sure you want to delete <strong>{selectedUser.name}</strong>?
-                    This will set their status to disabled and they won't be able to access the system.
+                    Are you sure you want to permanently delete <strong>{selectedUser.name}</strong>?
+                    This action cannot be undone and will remove all associated data.
                   </p>
                 </div>
                 <div className="flex justify-center space-x-3 pt-4">

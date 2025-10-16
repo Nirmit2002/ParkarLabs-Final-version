@@ -296,11 +296,213 @@ const deleteTask = async (req, res) => {
   }
 };
 
+// Get tasks for a specific module
+const getModuleTasks = async (req, res) => {
+  try {
+    const { moduleId } = req.params;
+
+    const result = await query(`
+      SELECT
+        t.id, t.title, t.description, t.created_at,
+        u.name as created_by_name,
+        (
+          -- Count direct task assignments
+          SELECT COUNT(DISTINCT a.assigned_to_user_id)
+          FROM assignments a
+          WHERE a.task_id = t.id
+        ) + (
+          -- Count users with module-level access
+          SELECT COUNT(DISTINCT ma.assigned_to_user_id)
+          FROM module_assignments ma
+          WHERE ma.module_id = $1
+        ) + (
+          -- Count users with course-level access
+          SELECT COUNT(DISTINCT ca.assigned_to_user_id)
+          FROM course_assignments ca
+          INNER JOIN modules m ON m.course_id = ca.course_id
+          WHERE m.id = $1
+        ) as assignment_count
+      FROM tasks t
+      LEFT JOIN users u ON t.created_by = u.id
+      WHERE t.module_id = $1
+      GROUP BY t.id, t.title, t.description, t.created_at, u.name
+      ORDER BY t.id ASC
+    `, [moduleId]);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Get module tasks error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tasks',
+      error: error.message
+    });
+  }
+};
+
+// Create task for a module
+const createModuleTask = async (req, res) => {
+  try {
+    const { moduleId } = req.params;
+    const { title, description } = req.body;
+    const createdBy = req.user.userId;
+
+    // Get course_id for the module
+    const moduleResult = await query('SELECT course_id FROM modules WHERE id = $1', [moduleId]);
+
+    if (moduleResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Module not found'
+      });
+    }
+
+    const relatedCourseId = moduleResult.rows[0].course_id;
+
+    const result = await query(`
+      INSERT INTO tasks (title, description, module_id, related_course_id, created_by, created_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      RETURNING id, title, description, created_at
+    `, [title, description, moduleId, relatedCourseId, createdBy]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Task created successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Create task error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create task',
+      error: error.message
+    });
+  }
+};
+
+// Update task
+const updateTask = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { title, description } = req.body;
+
+    const result = await query(`
+      UPDATE tasks
+      SET title = COALESCE($1, title),
+          description = COALESCE($2, description)
+      WHERE id = $3
+      RETURNING id, title, description, created_at
+    `, [title, description, taskId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Task updated successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Update task error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update task',
+      error: error.message
+    });
+  }
+};
+
+// Get assigned users for a task
+const getTaskAssignedUsers = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(`
+      SELECT u.id, u.name, u.email, a.status, a.due_date
+      FROM users u
+      INNER JOIN assignments a ON a.assigned_to_user_id = u.id
+      WHERE a.task_id = $1
+      ORDER BY u.name ASC
+    `, [id]);
+
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rowCount
+    });
+  } catch (error) {
+    console.error('Get task assigned users error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assigned users',
+      error: error.message
+    });
+  }
+};
+
+// Unassign task from users
+const unassignTask = async (req, res) => {
+  try {
+    const { id } = req.params; // task ID
+    const { userIds } = req.body;
+
+    if (!userIds || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide at least one user ID'
+      });
+    }
+
+    // Verify task exists
+    const taskResult = await query(
+      'SELECT id, title FROM tasks WHERE id = $1',
+      [id]
+    );
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    // Delete assignments for these users
+    const result = await query(`
+      DELETE FROM assignments
+      WHERE task_id = $1 AND assigned_to_user_id = ANY($2)
+    `, [id, userIds]);
+
+    res.json({
+      success: true,
+      message: `Task unassigned from ${userIds.length} user(s). ${result.rowCount} assignment(s) removed.`
+    });
+  } catch (error) {
+    console.error('Unassign task error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to unassign task',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllTasks,
   getMyTasks,
   createTask,
   assignTask,
   updateTaskStatus,
-  deleteTask
+  deleteTask,
+  getModuleTasks,
+  createModuleTask,
+  updateTask,
+  getTaskAssignedUsers,
+  unassignTask
 };

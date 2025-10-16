@@ -34,6 +34,14 @@ const register = async (req, res) => {
       });
     }
 
+    // Domain validation - only allow @parkar.digital emails
+    if (!email.toLowerCase().endsWith('@parkar.digital')) {
+      return res.status(403).json({
+        success: false,
+        message: 'Registration is only allowed for @parkar.digital email addresses'
+      });
+    }
+
     // Password validation
     if (password.length < 6) {
       return res.status(400).json({
@@ -156,14 +164,22 @@ const login = async (req, res) => {
       });
     }
 
-    // Get user with role information
+    // Domain validation - only allow @parkar.digital emails
+    if (!email.toLowerCase().endsWith('@parkar.digital')) {
+      return res.status(403).json({
+        success: false,
+        message: 'Login is only allowed for @parkar.digital email addresses'
+      });
+    }
+
+    // Get user with role information (case-insensitive email lookup)
     const userResult = await query(`
       SELECT u.id, u.email, u.name, u.azure_ad_id, u.status, r.name as role_name
       FROM users u
       LEFT JOIN roles r ON u.role_id = r.id
-      WHERE u.email = $1 AND u.status = 'active'
+      WHERE LOWER(u.email) = LOWER($1) AND u.status = 'active'
       LIMIT 1
-    `, [email.toLowerCase()]);
+    `, [email]);
 
     if (userResult.rows.length === 0) {
       return res.status(401).json({
@@ -174,20 +190,37 @@ const login = async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Check for stored password hash in sessions table
+    // Check for stored password hash - try local_auth table first, then sessions table
     let isValidPassword = false;
-    
-    const sessionResult = await query(`
-      SELECT meta FROM sessions 
-      WHERE user_id = $1 AND provider = 'local'
+    let passwordHash = null;
+
+    // First, check local_auth table (for users created via admin panel)
+    const localAuthResult = await query(`
+      SELECT password_hash FROM local_auth
+      WHERE user_id = $1
       ORDER BY created_at DESC LIMIT 1
     `, [user.id]);
 
-    if (sessionResult.rows.length > 0 && sessionResult.rows[0].meta?.password_hash) {
-      // Check hashed password (for registered users)
-      isValidPassword = await bcrypt.compare(password, sessionResult.rows[0].meta.password_hash);
+    if (localAuthResult.rows.length > 0) {
+      passwordHash = localAuthResult.rows[0].password_hash;
     } else {
-      // Fallback for existing demo accounts
+      // Fallback: check sessions table (for users registered via registration form)
+      const sessionResult = await query(`
+        SELECT meta FROM sessions
+        WHERE user_id = $1 AND provider = 'local'
+        ORDER BY created_at DESC LIMIT 1
+      `, [user.id]);
+
+      if (sessionResult.rows.length > 0 && sessionResult.rows[0].meta?.password_hash) {
+        passwordHash = sessionResult.rows[0].meta.password_hash;
+      }
+    }
+
+    if (passwordHash) {
+      // Check hashed password
+      isValidPassword = await bcrypt.compare(password, passwordHash);
+    } else {
+      // Fallback for existing demo accounts without password
       isValidPassword = password === 'temp123';
     }
 

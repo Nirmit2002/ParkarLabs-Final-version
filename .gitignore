@@ -16,11 +16,12 @@ pnpm-debug.log*
 .env
 .env.*.local
 
-# DB dumps and postgres data
+# DB dumps and postgres data (exclude backup SQL that needs to be committed)
 *.dump
-*.sql
 postgres_data/
 db/backups/
+# Allow the main backup file for deployment
+!db/backup/parkarlabs_backup.sql
 
 # IDE / OS
 .DS_Store
